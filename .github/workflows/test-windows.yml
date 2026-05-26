@@ -27,16 +27,15 @@ jobs:
 
       - name: Syntax check JS files
         run: |
-          # node --check on Windows chokes on Unix shebangs (#!...)
-          # Strip the first line if it starts with #! before checking
+          # Pipe each file through node as stdin to avoid shebang issues
           foreach ($f in @("lib/shellish-cmd.js","lib/safe-rm.js","lib/run.js","lib/render.js","lib/context.js")) {
-            $lines = Get-Content $f
-            if ($lines[0] -match '^#!') { $lines = $lines[1..($lines.Length-1)] }
-            $tmp = [System.IO.Path]::GetTempFileName() + ".js"
-            $lines | Set-Content $tmp
-            node --check $tmp
+            $code = Get-Content $f -Raw
+            # Strip shebang
+            if ($code.StartsWith("#!")) {
+              $code = $code.Substring($code.IndexOf("`n") + 1)
+            }
+            $code | node --check --input-type=script 2>&1
             if ($LASTEXITCODE -ne 0) { Write-Error "Syntax error in $f"; exit 1 }
-            Remove-Item $tmp
             Write-Host "  OK  $f"
           }
 
