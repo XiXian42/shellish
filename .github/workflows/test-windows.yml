@@ -13,8 +13,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: feat/windows
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
