@@ -13,15 +13,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
         continue-on-error: true
 
-      - name: Verify files present
+      - name: Verify checkout
         run: |
-          if (Test-Path "lib\run.js") { Write-Host "Files OK" } else { Write-Error "Checkout incomplete" }
-        with:
-          ref: feat/windows
+          if (Test-Path "lib\run.js") {
+            Write-Host "Checkout OK — files present"
+          } else {
+            Write-Error "Checkout failed — lib\run.js missing"
+            exit 1
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -49,64 +50,69 @@ jobs:
       - name: Syntax check - context.js
         run: node --check lib\context.js
 
-      - name: Test install.ps1 (dry run - syntax only)
+      - name: Test install.ps1 syntax
         run: |
-          # Parse the script for syntax errors without executing
+          $errors = $null
           $null = [System.Management.Automation.Language.Parser]::ParseFile(
-            "$PWD\install.ps1", [ref]$null, [ref]$null
+            "$PWD\install.ps1", [ref]$null, [ref]$errors
           )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
           Write-Host "install.ps1 syntax OK"
 
       - name: Test profile.ps1 syntax
         run: |
+          $errors = $null
           $null = [System.Management.Automation.Language.Parser]::ParseFile(
-            "$PWD\shell\profile.ps1", [ref]$null, [ref]$null
+            "$PWD\shell\profile.ps1", [ref]$null, [ref]$errors
           )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
           Write-Host "profile.ps1 syntax OK"
 
-      - name: Test shellish.cmd exists and is readable
+      - name: Test shellish.cmd exists
         run: |
           if (Test-Path "bin\shellish.cmd") {
             Write-Host "shellish.cmd OK"
-            Get-Content "bin\shellish.cmd"
           } else {
             Write-Error "shellish.cmd not found"
+            exit 1
           }
 
-      - name: Simulate install (skip agent detection, set mock config)
+      - name: Simulate install - write mock config
         run: |
-          # Create config as install.ps1 would
           $cfgDir = "$env:USERPROFILE\.config\shellish"
           New-Item -ItemType Directory -Force $cfgDir | Out-Null
-          @"
-          agent=pi
-          confirm_danger=ask
-          "@ | Set-Content "$cfgDir\config"
-          Write-Host "Config written: $cfgDir\config"
+          "agent=pi`nconfirm_danger=ask" | Set-Content "$cfgDir\config"
+          Write-Host "Config written OK"
           Get-Content "$cfgDir\config"
 
-      - name: Test shellish-cmd.js - version
+      - name: Test shellish-cmd.js version
         run: node lib\shellish-cmd.js version
 
-      - name: Test shellish-cmd.js - help
+      - name: Test shellish-cmd.js help
         run: node lib\shellish-cmd.js help
 
-      - name: Test shellish-cmd.js - status
+      - name: Test shellish-cmd.js status
         run: node lib\shellish-cmd.js status
 
-      - name: Test context.js - build prompt
+      - name: Test context.js build prompt
         run: |
-          $prompt = node lib\context.js build $PWD "list files in current directory"
+          $prompt = node lib\context.js build $PWD "list files here"
           if ($prompt -match "Instructions") {
             Write-Host "context.js build OK"
           } else {
-            Write-Error "context.js build output unexpected"
+            Write-Error "context.js unexpected output: $prompt"
+            exit 1
           }
 
-      - name: Test safe-rm.js help (no real files, just check it starts)
+      - name: Test safe-rm.js loads without error
         run: |
-          # Should exit 0 with no args (nothing to delete)
           $env:SHELLISH_CONFIRM_DANGER = "allow"
           $env:SHELLISH_SESSION_DIR = $env:TEMP
           node lib\safe-rm.js
-          Write-Host "safe-rm.js loaded OK"
+          Write-Host "safe-rm.js OK (no args = no-op)"
