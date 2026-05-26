@@ -25,20 +25,20 @@ jobs:
           $PSVersionTable.PSVersion
           node --version
 
-      - name: Syntax check - shellish-cmd.js
-        run: node --check lib/shellish-cmd.js
-
-      - name: Syntax check - safe-rm.js
-        run: node --check lib/safe-rm.js
-
-      - name: Syntax check - run.js
-        run: node --check lib/run.js
-
-      - name: Syntax check - render.js
-        run: node --check lib/render.js
-
-      - name: Syntax check - context.js
-        run: node --check lib/context.js
+      - name: Syntax check JS files
+        run: |
+          # node --check on Windows chokes on Unix shebangs (#!...)
+          # Strip the first line if it starts with #! before checking
+          foreach ($f in @("lib/shellish-cmd.js","lib/safe-rm.js","lib/run.js","lib/render.js","lib/context.js")) {
+            $lines = Get-Content $f
+            if ($lines[0] -match '^#!') { $lines = $lines[1..($lines.Length-1)] }
+            $tmp = [System.IO.Path]::GetTempFileName() + ".js"
+            $lines | Set-Content $tmp
+            node --check $tmp
+            if ($LASTEXITCODE -ne 0) { Write-Error "Syntax error in $f"; exit 1 }
+            Remove-Item $tmp
+            Write-Host "  OK  $f"
+          }
 
       - name: Syntax check install.ps1
         run: |
