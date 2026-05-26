@@ -31,14 +31,13 @@ jobs:
 
       - name: Syntax check JS files
         run: |
-          # Pipe each file through node as stdin to avoid shebang issues
           foreach ($f in @("lib/shellish-cmd.js","lib/safe-rm.js","lib/run.js","lib/render.js","lib/context.js")) {
             $code = Get-Content $f -Raw
-            # Strip shebang
+            # Strip shebang so node doesn't choke on #!
             if ($code.StartsWith("#!")) {
               $code = $code.Substring($code.IndexOf("`n") + 1)
             }
-            $code | node --check --input-type=script 2>&1
+            $code | node --check --input-type=commonjs 2>&1
             if ($LASTEXITCODE -ne 0) { Write-Error "Syntax error in $f"; exit 1 }
             Write-Host "  OK  $f"
           }
