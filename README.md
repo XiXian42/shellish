@@ -142,9 +142,9 @@ macOS uses the `trash` CLI; Linux follows the freedesktop Trash spec.
 |---|---|
 | macOS | ✅ |
 | Linux | ✅ |
-| Windows | ❌ not supported |
+| Windows | 🧪 beta |
 
-Shell: zsh / bash
+Shell: zsh / bash / PowerShell
 
 ---
 
@@ -285,9 +285,9 @@ LLM 判断：typo → 显示纠正  /  自然语言 → 继续
 |---|---|
 | macOS | ✅ |
 | Linux | ✅ |
-| Windows | ❌ 暂不支持 |
+| Windows | 🧪 beta |
 
-Shell：zsh / bash
+Shell：zsh / bash / PowerShell
 
 ---
 
