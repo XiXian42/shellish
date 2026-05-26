@@ -60,6 +60,8 @@ if [[ -d "${SCRIPT_DIR}/bin" ]]; then
 else
   # Remote install via git clone or curl
   echo "  $(cyan "→") Downloading shellish…"
+  # Remove stale install dir so git clone doesn't fail
+  [[ -d "$INSTALL_DIR" ]] && rm -rf "$INSTALL_DIR"
   if command -v git &>/dev/null; then
     git clone --depth=1 "$SHELLISH_REPO" "$INSTALL_DIR" 2>&1 | sed 's/^/    /'
   else
@@ -89,13 +91,19 @@ ln -s "${INSTALL_DIR}/bin/shellish" "${BIN_DIR}/shellish"
 echo "  $(green "✓") Installed shellish → ${BIN_DIR}/shellish"
 echo ""
 
-# ── ensure BIN_DIR is in PATH ──────────────────────────────────────────────────
+# ── ensure BIN_DIR is in PATH (write to rc if needed) ────────────────────────
 if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
-  echo "  $(cyan "!") ${BIN_DIR} is not in your PATH."
-  echo "    Add this to your shell rc file:"
-  echo ""
-  echo "      export PATH=\"${BIN_DIR}:\$PATH\""
-  echo ""
+  case "$CURRENT_SHELL" in
+    zsh)  PATH_RC="${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash) PATH_RC="${HOME}/.bashrc" ;;
+    *)    PATH_RC="" ;;
+  esac
+  PATH_EXPORT="export PATH=\"${BIN_DIR}:\$PATH\""
+  if [[ -n "$PATH_RC" ]] && ! grep -q "$BIN_DIR" "$PATH_RC" 2>/dev/null; then
+    printf "\n# shellish: add ~/.local/bin to PATH\n%s\n" "$PATH_EXPORT" >> "$PATH_RC"
+    echo "  $(green "✓") Added ${BIN_DIR} to PATH in $PATH_RC"
+  fi
+  export PATH="${BIN_DIR}:${PATH}"
 fi
 
 # ── detect available agents ───────────────────────────────────────────────────
@@ -202,7 +210,7 @@ echo ""
 echo "  $(green "$(bold "shellish installed successfully!")")"
 echo ""
 echo "  Next steps:"
-echo "    1. Restart your shell  $(dim "or")  source ~/${CURRENT_SHELL}rc"
+echo "    1. Restart your shell  $(dim "or")  source ~/.${CURRENT_SHELL}rc"
 echo "    2. Try it:"
 echo "       $(cyan "shellish \"list all png files in this directory\"")"
 if [[ "$HOOK_INSTALLED" -eq 1 ]]; then
