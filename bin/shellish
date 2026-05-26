@@ -1,0 +1,299 @@
+#!/usr/bin/env bash
+# shellish — natural language shell agent dispatcher
+# https://github.com/your-org/shellish
+set -euo pipefail
+
+SHELLISH_VERSION="0.1.0"
+# Resolve symlinks portably (readlink -f = GNU; readlink -f unavailable on macOS base)
+_shellish_realpath() {
+  local p="$1"
+  # If readlink -f works (GNU coreutils / Linux), use it
+  if readlink -f "$p" &>/dev/null; then
+    readlink -f "$p"
+    return
+  fi
+  # Pure-bash fallback: cd into each symlink target until we reach a real file
+  local dir base target
+  while [[ -L "$p" ]]; do
+    dir="$(cd "$(dirname "$p")" && pwd)"
+    base="$(basename "$p")"
+    target="$(readlink "$p")"
+    if [[ "$target" == /* ]]; then p="$target"
+    else p="${dir}/${target}"
+    fi
+  done
+  echo "$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+}
+_SHELLISH_REAL_BIN="$(_shellish_realpath "${BASH_SOURCE[0]}")"
+SHELLISH_LIB_DIR="$(cd "$(dirname "$_SHELLISH_REAL_BIN")/../lib" && pwd)"
+
+# shellcheck source=lib/config.sh
+source "${SHELLISH_LIB_DIR}/config.sh"
+# shellcheck source=lib/agent.sh
+source "${SHELLISH_LIB_DIR}/agent.sh"
+# shellcheck source=lib/detect.sh
+source "${SHELLISH_LIB_DIR}/detect.sh"
+# shellcheck source=lib/confirm.sh
+source "${SHELLISH_LIB_DIR}/confirm.sh"
+# shellcheck source=lib/spinner.sh
+source "${SHELLISH_LIB_DIR}/spinner.sh"
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+_bold()  { printf "\033[1m%s\033[0m" "$*"; }
+_green() { printf "\033[32m%s\033[0m" "$*"; }
+_cyan()  { printf "\033[36m%s\033[0m" "$*"; }
+_dim()   { printf "\033[2m%s\033[0m" "$*"; }
+
+_header() {
+  echo ""
+  echo "  $(_bold "shellish") $(_dim "v${SHELLISH_VERSION}") — natural language shell agent"
+  echo ""
+}
+
+# ── usage ─────────────────────────────────────────────────────────────────────
+_usage() {
+  _header
+  cat <<EOF
+  $(_bold USAGE)
+    shellish <prompt>            Run a natural-language prompt with your agent
+    shellish config              Configure default agent (interactive)
+    shellish status              Show current config and available agents
+    shellish install-hook        Write shell hook to ~/.zshrc / ~/.bashrc
+    shellish uninstall-hook      Remove shell hook
+    shellish version             Print version
+    shellish help                Show this help
+
+  $(_bold EXAMPLES)
+    shellish "帮我把当前目录下所有 png 压缩一下"
+    shellish "fix the last git conflict"
+    shellish "find all TODO comments in this repo"
+
+  $(_bold SHELL HOOK)
+    After running 'shellish install-hook', you can type natural language
+    directly at the shell prompt without any prefix:
+
+      \$ 帮我整理一下这个目录
+      \$ find all log files older than 7 days and delete them
+
+EOF
+}
+
+# ── config (interactive agent picker) ────────────────────────────────────────
+cmd_config() {
+  _header
+  echo "  $(_bold "Configure shellish")"
+  echo ""
+
+  local current
+  current="$(config_get agent)"
+  if [[ -n "$current" ]]; then
+    echo "  Current agent: $(_green "$current")"
+    echo ""
+    printf "  Change it? [y/N] "
+    local ans; read -r ans </dev/tty
+    [[ "$ans" == "y" || "$ans" == "Y" ]] || { echo "  No changes made."; echo ""; return 0; }
+    echo ""
+  fi
+
+  local chosen
+  chosen="$(shellish_pick_agent)" || return 1
+
+  config_set agent "$chosen"
+  echo ""
+  echo "  $(_green "✓") Default agent set to: $(_bold "$chosen")"
+  echo ""
+
+  # Ask about dangerous-op confirmation preference
+  local confirm_pref
+  confirm_pref="$(config_get confirm_danger)"
+  confirm_pref="${confirm_pref:-ask}"
+
+  echo "  When the agent deletes files (rm), what should shellish do?"
+  echo "    1) ask    — prompt each time (moves to trash)  $( [[ $confirm_pref == ask   ]] && echo '← current' )"
+  echo "    2) allow  — always move to trash silently      $( [[ $confirm_pref == allow ]] && echo '← current' )"
+  echo ""
+  printf "  Choose [1-2, default=1]: "
+  local cpick; read -r cpick </dev/tty
+  case "${cpick:-1}" in
+    1) config_set confirm_danger ask  ;;
+    2) config_set confirm_danger allow;;
+    *) config_set confirm_danger ask  ;;
+  esac
+
+  echo ""
+  echo "  $(_green "✓") Config saved to: ${SHELLISH_CONFIG_FILE}"
+  echo ""
+}
+
+# ── status ─────────────────────────────────────────────────────────────────────
+cmd_status() {
+  _header
+  echo "  $(_bold "System status")"
+  echo ""
+
+  local -a avail
+  read -r -a avail <<< "$(shellish_detect_agents)"
+
+  echo "  Detected agents:"
+  local a
+  for a in "${SHELLISH_SUPPORTED_AGENTS[@]}"; do
+    if command -v "$a" &>/dev/null; then
+      printf "    $(_green "✓") %-10s  %s\n" "$a" "$(command -v "$a")"
+    else
+      printf "    $(_dim "✗") %-10s  not found\n" "$a"
+    fi
+  done
+
+  echo ""
+  echo "  Config: ${SHELLISH_CONFIG_FILE}"
+  local agent confirm_danger
+  agent="$(config_get agent)"
+  confirm_danger="$(config_get confirm_danger)"
+  echo "    agent          = $(_bold "${agent:-<not set>}")"
+  echo "    rm behaviour   = $(_bold "${confirm_danger:-ask}")  (ask=prompt+trash / allow=silent trash)"
+  echo ""
+}
+
+# ── install shell hook ─────────────────────────────────────────────────────────
+cmd_install_hook() {
+  local shell_name
+  shell_name="$(basename "${SHELL:-bash}")"
+  local rc_file hook_file
+
+  case "$shell_name" in
+    zsh)
+      rc_file="${ZDOTDIR:-$HOME}/.zshrc"
+      hook_file="${SHELLISH_LIB_DIR}/../shell/zshrc.zsh"
+      ;;
+    bash)
+      rc_file="${HOME}/.bashrc"
+      hook_file="${SHELLISH_LIB_DIR}/../shell/bashrc.bash"
+      ;;
+    *)
+      echo "  ✗ Unsupported shell: $shell_name (supported: zsh, bash)"
+      return 1
+      ;;
+  esac
+
+  hook_file="$(cd "$(dirname "$hook_file")" && pwd)/$(basename "$hook_file")"
+
+  # Guard: don't double-install
+  if grep -q 'shellish' "$rc_file" 2>/dev/null; then
+    echo "  $(_green "✓") Hook already present in $rc_file"
+    echo "    Run: shellish uninstall-hook   to remove it first."
+    return 0
+  fi
+
+  cat >> "$rc_file" <<EOF
+
+# ── shellish hook (added by shellish install-hook) ──────────────────────────
+source "${hook_file}"
+# ────────────────────────────────────────────────────────────────────────────
+EOF
+
+  echo ""
+  echo "  $(_green "✓") Hook installed into $rc_file"
+  echo "  Restart your shell or run:  source $rc_file"
+  echo ""
+}
+
+# ── uninstall shell hook ───────────────────────────────────────────────────────
+cmd_uninstall_hook() {
+  local rc_file
+  case "$(basename "${SHELL:-bash}")" in
+    zsh)  rc_file="${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash) rc_file="${HOME}/.bashrc" ;;
+    *)    echo "  ✗ Unsupported shell"; return 1 ;;
+  esac
+
+  if ! grep -q 'shellish' "$rc_file" 2>/dev/null; then
+    echo "  No shellish hook found in $rc_file"
+    return 0
+  fi
+
+  # Remove the block between the two marker comments
+  local tmp; tmp=$(mktemp)
+  sed '/# ── shellish hook/,/# ──────.*──$/d' "$rc_file" > "$tmp"
+  mv "$tmp" "$rc_file"
+
+  echo "  $(_green "✓") Hook removed from $rc_file"
+  echo "  Restart your shell to apply."
+}
+
+# ── run prompt ────────────────────────────────────────────────────────────────
+cmd_run() {
+  local prompt="$*"
+
+  if [[ -z "$prompt" ]]; then
+    echo "  ✗ Empty prompt. Usage: shellish <your request>"
+    return 1
+  fi
+
+  local agent
+  agent="$(config_get agent)"
+
+  if [[ -z "$agent" ]]; then
+    echo ""
+    echo "  $(_bold "shellish") is not configured yet."
+    echo "  Running first-time setup…"
+    cmd_config || return 1
+    agent="$(config_get agent)"
+  fi
+
+  echo ""
+  echo "  $(_cyan "🤖 shellish") → $(_bold "$agent")"
+  echo "  $(_dim "$prompt")"
+  echo ""
+
+  shellish_run_agent "$prompt"
+}
+
+# ── from-shell hook entry point ───────────────────────────────────────────────
+# Called by command_not_found_handler with the raw command line.
+cmd_from_shell() {
+  local raw="$*"
+
+  local agent
+  agent="$(config_get agent)"
+
+  if [[ -z "$agent" ]]; then
+    echo ""
+    echo "  $(_bold "shellish") is not configured yet."
+    echo "  Run: shellish config"
+    echo ""
+    return 1
+  fi
+
+  echo ""
+  echo "  $(_cyan "🤖") $(_bold "$agent") ← $(_dim "$raw")"
+  echo ""
+
+  # Pass --from-shell so run.js uses build-shell mode:
+  # the agent will output __TYPO__: <correction> if it looks like a typo,
+  # or handle the request normally otherwise. One LLM call, not two.
+  export SHELLISH_FROM_SHELL=1
+  shellish_run_agent "$raw"
+}
+
+# ── dispatch ──────────────────────────────────────────────────────────────────
+main() {
+  # If no arguments at all → help
+  if [[ $# -eq 0 ]]; then _usage; return 0; fi
+
+  local cmd="$1"
+  shift || true
+
+  case "$cmd" in
+    -h|--help|help)      _usage ;;
+    -v|--version|version) echo "shellish v${SHELLISH_VERSION}" ;;
+    config)              cmd_config ;;
+    status)              cmd_status ;;
+    install-hook)        cmd_install_hook ;;
+    uninstall-hook)      cmd_uninstall_hook ;;
+    --from-shell)        cmd_from_shell "$@" ;;
+    "")                  cmd_run "" ;;   # empty string arg → caught by cmd_run
+    *)                   cmd_run "$cmd" "$@" ;;
+  esac
+}
+
+main "$@"
