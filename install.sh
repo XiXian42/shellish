@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # shellish installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
-set -euo pipefail
+set -eo pipefail
+# Note: -u omitted intentionally — BASH_SOURCE[0] is unset when piped via curl | bash
 
 SHELLISH_VERSION="0.1.0"
 SHELLISH_REPO="https://github.com/XiXian42/shellish"
 SHELLISH_RAW="https://raw.githubusercontent.com/XiXian42/shellish/main"
 
 # For local dev install: if this script lives next to bin/ use it directly
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+# BASH_SOURCE[0] may be empty when piped via curl | bash — guard with default
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/stdin}")" 2>/dev/null && pwd || echo "")"
 
 INSTALL_DIR="${SHELLISH_INSTALL_DIR:-${HOME}/.local/share/shellish}"
 BIN_DIR="${SHELLISH_BIN_DIR:-${HOME}/.local/bin}"
@@ -156,49 +158,41 @@ EOF
 
 echo ""
 echo "  $(green "✓") Default agent: $(bold "$CHOSEN_AGENT")"
+echo "  $(green "✓") Delete behaviour: $(bold "ask") (prompt + move to trash)"
 echo ""
 
-# ── install shell hook ────────────────────────────────────────────────────────
-hr
-echo ""
-echo "  $(bold "Install shell hook?")"
-echo "  This lets you type natural language directly at the prompt"
-echo "  without any 'shellish' prefix."
-echo ""
-printf "  Install hook into ~/.${CURRENT_SHELL}rc? [Y/n] "
-read -r HOOK_CHOICE </dev/tty
-HOOK_CHOICE="${HOOK_CHOICE:-Y}"
+# ── install shell hook (always, no prompt) ───────────────────────────────────
+HOOK_INSTALLED=0
+case "$CURRENT_SHELL" in
+  zsh)
+    RC_FILE="${ZDOTDIR:-$HOME}/.zshrc"
+    HOOK_SOURCE="${INSTALL_DIR}/shell/zshrc.zsh"
+    ;;
+  bash)
+    RC_FILE="${HOME}/.bashrc"
+    HOOK_SOURCE="${INSTALL_DIR}/shell/bashrc.bash"
+    ;;
+  *)
+    RC_FILE=""
+    HOOK_SOURCE=""
+    ;;
+esac
 
-if [[ "$HOOK_CHOICE" == "y" || "$HOOK_CHOICE" == "Y" ]]; then
-  # determine rc file and hook source
-  case "$CURRENT_SHELL" in
-    zsh)
-      RC_FILE="${ZDOTDIR:-$HOME}/.zshrc"
-      HOOK_SOURCE="${INSTALL_DIR}/shell/zshrc.zsh"
-      ;;
-    bash)
-      RC_FILE="${HOME}/.bashrc"
-      HOOK_SOURCE="${INSTALL_DIR}/shell/bashrc.bash"
-      ;;
-    *)
-      echo "  $(red "✗") Unsupported shell for auto-hook: $CURRENT_SHELL"
-      HOOK_CHOICE="n"
-      ;;
-  esac
-
-  if [[ "$HOOK_CHOICE" != "n" ]]; then
-    if grep -q 'shellish' "$RC_FILE" 2>/dev/null; then
-      echo "  $(green "✓") Hook already present in $RC_FILE — skipping"
-    else
-      cat >> "$RC_FILE" <<HOOKEOF
+if [[ -n "$RC_FILE" ]]; then
+  if grep -q 'shellish' "$RC_FILE" 2>/dev/null; then
+    echo "  $(green "✓") Hook already present in $RC_FILE"
+  else
+    cat >> "$RC_FILE" <<HOOKEOF
 
 # ── shellish hook (added by shellish install.sh) ────────────────────────────
 source "${HOOK_SOURCE}"
 # ────────────────────────────────────────────────────────────────────────────
 HOOKEOF
-      echo "  $(green "✓") Hook added to $RC_FILE"
-    fi
+    echo "  $(green "✓") Hook added to $RC_FILE"
   fi
+  HOOK_INSTALLED=1
+else
+  echo "  $(red "!") Unknown shell '$CURRENT_SHELL' — run: shellish install-hook"
 fi
 
 # ── done ──────────────────────────────────────────────────────────────────────
@@ -211,7 +205,7 @@ echo "  Next steps:"
 echo "    1. Restart your shell  $(dim "or")  source ~/${CURRENT_SHELL}rc"
 echo "    2. Try it:"
 echo "       $(cyan "shellish \"list all png files in this directory\"")"
-if [[ "$HOOK_CHOICE" == "y" || "$HOOK_CHOICE" == "Y" ]]; then
+if [[ "$HOOK_INSTALLED" -eq 1 ]]; then
   echo "       $(dim "or just type at the prompt:")"
   echo "       $(cyan "list all png files in this directory")"
 fi
