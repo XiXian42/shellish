@@ -2,9 +2,9 @@ name: Test Windows Install
 
 on:
   push:
-    branches: [feat/windows, main]
+    branches: [feat/windows]
   pull_request:
-    branches: [main]
+    branches: [main, feat/windows]
 
 jobs:
   test-windows:
@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: feat/windows
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
