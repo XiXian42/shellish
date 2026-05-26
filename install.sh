@@ -106,19 +106,13 @@ if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
   export PATH="${BIN_DIR}:${PATH}"
 fi
 
-# ── detect available agents ───────────────────────────────────────────────────
-echo "  Checking for supported agents…"
-echo ""
+# ── detect available agents (silent) ─────────────────────────────────────────
 FOUND_AGENTS=()
 for agent in pi omp claude codex; do
   if command -v "$agent" &>/dev/null; then
-    printf "    $(green "✓") %-10s  %s\n" "$agent" "$(command -v "$agent")"
     FOUND_AGENTS+=("$agent")
-  else
-    printf "    $(dim "✗") %-10s  not found\n" "$agent"
   fi
 done
-echo ""
 
 if [[ ${#FOUND_AGENTS[@]} -eq 0 ]]; then
   echo "  $(red "✗") No supported agent found."
@@ -209,7 +203,14 @@ hr
 echo ""
 echo "  $(green "$(bold "shellish installed successfully!")")"
 echo ""
-echo "  Next steps:"
+echo "  Other commands:"
+echo "    shellish config          — change agent or settings"
+echo "    shellish status          — show current setup"
+echo "    shellish uninstall-hook  — remove shell hook"
+echo ""
+hr
+echo ""
+echo "  $(bold "Next steps")"
 echo "    1. Restart your shell  $(dim "or")  source ~/.${CURRENT_SHELL}rc"
 echo "    2. Try it:"
 echo "       $(cyan "shellish \"list all png files in this directory\"")"
@@ -217,9 +218,4 @@ if [[ "$HOOK_INSTALLED" -eq 1 ]]; then
   echo "       $(dim "or just type at the prompt:")"
   echo "       $(cyan "list all png files in this directory")"
 fi
-echo ""
-echo "  Other commands:"
-echo "    shellish config          — change agent or settings"
-echo "    shellish status          — show current setup"
-echo "    shellish uninstall-hook  — remove shell hook"
 echo ""
