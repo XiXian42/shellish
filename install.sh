@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # shellish installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/your-org/shellish/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
 set -euo pipefail
 
 SHELLISH_VERSION="0.1.0"
-SHELLISH_REPO="https://github.com/your-org/shellish"
-SHELLISH_RAW="https://raw.githubusercontent.com/your-org/shellish/main"
+SHELLISH_REPO="https://github.com/XiXian42/shellish"
+SHELLISH_RAW="https://raw.githubusercontent.com/XiXian42/shellish/main"
 
 # For local dev install: if this script lives next to bin/ use it directly
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"

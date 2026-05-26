@@ -33,7 +33,7 @@ $ 删除 build 目录
 ## 安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/axlewis/shellish/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
 ```
 
 安装过程会自动：
@@ -113,7 +113,7 @@ shellish uninstall-hook  # 移除 shell hook
 ## 卸载
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/axlewis/shellish/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/uninstall.sh | bash
 ```
 
 ---
