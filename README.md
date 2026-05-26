@@ -36,16 +36,22 @@ $ delete the build directory
 
 ### Install
 
+**macOS / Linux**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
 ```
 
 The installer will:
 1. Detect available AI agents on your system (pi / omp / claude / codex)
 2. Ask you to pick a default
-3. Write the hook into `~/.zshrc` or `~/.bashrc`
+3. Write the hook into your shell profile
 
-Restart your shell or `source ~/.zshrc` to activate.
+Restart your shell to activate.
 
 > **Prerequisite**: at least one supported AI agent must already be installed.
 
@@ -174,16 +180,22 @@ $ 删除 build 目录
 
 ### 安装
 
+**macOS / Linux**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
+```
+
+**Windows（PowerShell）**
+```powershell
+irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
 ```
 
 安装过程会自动：
 1. 检测系统上已有的 AI agent（pi / omp / claude / codex）
 2. 让你选一个默认 agent
-3. 把 hook 写入 `~/.zshrc` 或 `~/.bashrc`
+3. 把 hook 写入 shell 配置文件
 
-重启终端或 `source ~/.zshrc` 后即可使用。
+重启终端后即可使用。
 
 > **前提**：需要已安装至少一个支持的 AI agent。
 
