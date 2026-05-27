@@ -2,12 +2,15 @@ name: Test Windows Install
 
 on:
   push:
-    branches: [main, feat/windows]
+    branches: [main]
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   test-windows:
@@ -60,6 +63,14 @@ jobs:
           if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
           Write-Host "profile.ps1 syntax OK"
 
+      - name: Load profile.ps1 in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          . "$PWD\shell\profile.ps1"
+          if (-not $global:_shellishBin) { Write-Error "profile did not set shellish bin"; exit 1 }
+          if (-not (Test-Path $global:_shellishBin)) { Write-Error "shellish bin missing: $global:_shellishBin"; exit 1 }
+          Write-Host "Windows PowerShell 5.1 profile load OK: $global:_shellishBin"
+
       - name: Check required files exist
         run: |
           $files = @(
@@ -81,10 +92,33 @@ jobs:
         run: |
           $cfgDir = "$env:USERPROFILE\.config\shellish"
           New-Item -ItemType Directory -Force $cfgDir | Out-Null
-          "agent=pi`nconfirm_danger=ask" | Set-Content "$cfgDir\config"
+          [System.IO.File]::WriteAllText(
+            "$cfgDir\config",
+            "agent=pi`nconfirm_danger=ask`n",
+            (New-Object System.Text.UTF8Encoding($false))
+          )
           node lib\shellish-cmd.js version
           node lib\shellish-cmd.js help
           node lib\shellish-cmd.js status
+
+      - name: Test legacy UTF-16 config is readable
+        shell: powershell
+        run: |
+          $cfgDir = "$env:USERPROFILE\.config\shellish"
+          [System.IO.File]::WriteAllText("$cfgDir\config", "agent=codex`nconfirm_danger=ask`n", [System.Text.Encoding]::Unicode)
+          node lib\shellish-cmd.js status
+
+      - name: Test --from-shell is not leaked by batch entrypoint
+        shell: cmd
+        env:
+          SHELLISH_DRY_RUN: "1"
+        run: |
+          bin\shellish.cmd --from-shell 你是什么模型 > out.txt
+          type out.txt
+          findstr /C:"--from-shell" out.txt
+          if %ERRORLEVEL% EQU 0 exit /b 1
+          findstr /C:"DRY_RUN fromShell=1" out.txt
+          if %ERRORLEVEL% NEQ 0 exit /b 1
 
       - name: Test context.js build
         run: |

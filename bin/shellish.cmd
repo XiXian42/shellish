@@ -17,17 +17,11 @@ if "%~1"=="help"           goto :help
 if "%~1"=="-h"             goto :help
 if "%~1"=="--help"         goto :help
 
-:: Default: run a prompt via run.js
-:: Detect --from-shell flag
-set "FROM_SHELL_FLAG="
-if "%~1"=="--from-shell" (
-    set "FROM_SHELL_FLAG=--from-shell"
-    shift
-)
-
-:: Remaining args are: <agent> is read from config; pass cwd + prompt
-:: We delegate fully to shellish-run.js for prompt handling
-node "%SHELLISH_LIB%\shellish-cmd.js" %FROM_SHELL_FLAG% %*
+:: Default: delegate all argument parsing to shellish-cmd.js.
+:: Important: do not parse/shift --from-shell here. In batch files %* always
+:: contains the original arguments, so shifting would leak --from-shell into
+:: the user prompt.
+node "%SHELLISH_LIB%\shellish-cmd.js" %*
 goto :eof
 
 :version

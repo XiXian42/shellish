@@ -2,23 +2,35 @@
 # Added to $PROFILE by install.ps1
 #
 # Intercepts unknown commands and routes natural-language input to shellish.
+# Syntax target: Windows PowerShell 5.1+ and PowerShell 7+.
 
-$_shellishBin = (Get-Command shellish.cmd -ErrorAction SilentlyContinue)?.Source
+$_shellishRoot = Split-Path -Parent $PSScriptRoot
+$global:_shellishBin = Join-Path $_shellishRoot 'bin\shellish.cmd'
+$_shellishBinDir = Split-Path -Parent $global:_shellishBin
 
-if ($_shellishBin) {
+if (Test-Path $global:_shellishBin) {
+    # Prefer the real install entrypoint for this PowerShell session. This avoids
+    # stale/broken copies of shellish.cmd in earlier PATH directories.
+    $pathParts = @($env:PATH -split ';' | Where-Object { $_ -and ($_ -ne $_shellishBinDir) })
+    $env:PATH = (@($_shellishBinDir) + $pathParts) -join ';'
+
     $ExecutionContext.InvokeCommand.CommandNotFoundAction = {
         param([string]$Name, [System.Management.Automation.CommandLookupEventArgs]$EventArgs)
 
-        # Pass the raw input line to shellish
-        & shellish.cmd --from-shell $Name
-        $exitCode = $LASTEXITCODE
+        # PowerShell may probe Get-<name> while resolving unknown commands.
+        # Do not route those internal probes to the agent.
+        if ($Name -like 'Get-*') { return }
 
-        # Tell PowerShell not to show its own "not recognized" error
-        $EventArgs.StopSearch = $true
+        $unknownCommand = $Name
+        $shellishBin = $global:_shellishBin
 
-        # Preserve exit code in $?
-        if ($exitCode -ne 0) {
-            $global:LASTEXITCODE = $exitCode
-        }
+        # In Windows PowerShell 5.1, CommandNotFoundAction should provide a
+        # CommandScriptBlock to replace the missing command. Side-effecting here
+        # and setting StopSearch is not reliable.
+        $EventArgs.CommandScriptBlock = {
+            $rawInput = (@($unknownCommand) + @($args)) -join ' '
+            & $shellishBin --from-shell $rawInput
+            $global:LASTEXITCODE = $LASTEXITCODE
+        }.GetNewClosure()
     }
 }

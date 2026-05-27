@@ -6,9 +6,6 @@ $ErrorActionPreference = 'Stop'
 $VERSION    = '0.1.0'
 $REPO       = 'https://github.com/XiXian42/shellish'
 $INSTALL_DIR = "$env:LOCALAPPDATA\shellish"
-$BIN_DIR     = "$env:LOCALAPPDATA\Microsoft\WindowsApps"  # in PATH by default on Win10+
-# Alternative bin dir if WindowsApps is not writable:
-$BIN_DIR_ALT = "$env:USERPROFILE\.local\bin"
 
 function Write-Header {
     Write-Host ""
@@ -22,6 +19,10 @@ function Write-Ok($msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
 function Write-Err($msg)  { Write-Host "  ✗ $msg" -ForegroundColor Red }
 function Write-Info($msg) { Write-Host "  → $msg" -ForegroundColor Cyan }
 function Write-Dim($msg)  { Write-Host "    $msg" -ForegroundColor DarkGray }
+function Write-Utf8NoBom($path, $text) {
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($path, $text, $enc)
+}
 
 Write-Header
 
@@ -40,14 +41,23 @@ if (Test-Path $INSTALL_DIR) {
 }
 
 if (Get-Command git -ErrorAction SilentlyContinue) {
-    git clone --depth=1 $REPO $INSTALL_DIR 2>&1 | ForEach-Object { Write-Dim $_ }
+    # Git writes normal progress to stderr. In Windows PowerShell 5.1,
+    # piping native stderr with $ErrorActionPreference='Stop' can turn that
+    # harmless progress into NativeCommandError. Run quietly and check exit.
+    & git clone --quiet --depth=1 $REPO $INSTALL_DIR
+    if ($LASTEXITCODE -ne 0) {
+        throw "git clone failed with exit code $LASTEXITCODE"
+    }
 } else {
     # Fallback: download zip
     $zip = "$env:TEMP\shellish.zip"
+    $src = "$env:TEMP\shellish-src"
+    if (Test-Path $src) { Remove-Item -Recurse -Force $src }
     Invoke-WebRequest "$REPO/archive/refs/heads/main.zip" -OutFile $zip
-    Expand-Archive $zip "$env:TEMP\shellish-src" -Force
-    Move-Item "$env:TEMP\shellish-src\shellish-main" $INSTALL_DIR
-    Remove-Item $zip
+    Expand-Archive $zip $src -Force
+    Move-Item "$src\shellish-main" $INSTALL_DIR
+    Remove-Item $zip -Force
+    Remove-Item $src -Recurse -Force
 }
 
 Write-Ok "Downloaded to $INSTALL_DIR"
@@ -55,28 +65,37 @@ Write-Ok "Downloaded to $INSTALL_DIR"
 # ── add bin to PATH ───────────────────────────────────────────────────────────
 $binSrc = "$INSTALL_DIR\bin"
 
-# Try to place shellish.cmd somewhere already in PATH
-$inPath = $false
-foreach ($dir in $env:PATH.Split(';')) {
-    if ($dir -and (Test-Path $dir) -and $dir -ne $binSrc) {
-        try {
-            Copy-Item "$binSrc\shellish.cmd" "$dir\shellish.cmd" -Force
-            $inPath = $true
-            Write-Ok "Installed shellish.cmd → $dir\shellish.cmd"
-            break
-        } catch { }
+# Do not copy bin\shellish.cmd into arbitrary PATH directories: it depends on
+# ..\lib relative to its own location. Add the real bin directory instead.
+$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if ($null -eq $userPath) { $userPath = '' }
+$userParts = @($userPath -split ';' | Where-Object { $_ })
+$hasBin = $false
+foreach ($p in $userParts) {
+    if ([string]::Equals($p.TrimEnd('\'), $binSrc.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+        $hasBin = $true
+        break
     }
 }
+if (-not $hasBin) {
+    [Environment]::SetEnvironmentVariable('PATH', "$binSrc;$userPath", 'User')
+    Write-Ok "Added $binSrc to user PATH"
+} else {
+    Write-Ok "$binSrc already in user PATH"
+}
+# Also prefer the real bin in the current installer session.
+$env:PATH = "$binSrc;$env:PATH"
 
-if (-not $inPath) {
-    # Add INSTALL_DIR\bin to user PATH permanently
-    $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-    if ($userPath -notlike "*$binSrc*") {
-        [Environment]::SetEnvironmentVariable('PATH', "$binSrc;$userPath", 'User')
-        $env:PATH = "$binSrc;$env:PATH"
-        Write-Ok "Added $binSrc to user PATH"
+# Warn if another shellish.cmd appears earlier; the profile hook will prepend
+# the real bin each session, but this helps diagnose stale copies.
+try {
+    $cmds = @(Get-Command shellish.cmd -All -ErrorAction SilentlyContinue)
+    foreach ($c in $cmds) {
+        if ($c.Source -and (-not [string]::Equals($c.Source, "$binSrc\shellish.cmd", [System.StringComparison]::OrdinalIgnoreCase))) {
+            Write-Dim "Note: another shellish.cmd exists at $($c.Source)"
+        }
     }
-}
+} catch { }
 
 # ── detect agents ─────────────────────────────────────────────────────────────
 $agents = @()
@@ -115,10 +134,11 @@ $chosen = $agents[$idx]
 # ── save config ───────────────────────────────────────────────────────────────
 $cfgDir = "$env:USERPROFILE\.config\shellish"
 New-Item -ItemType Directory -Force $cfgDir | Out-Null
-@"
+$configText = @"
 agent=$chosen
 confirm_danger=ask
-"@ | Set-Content "$cfgDir\config"
+"@
+Write-Utf8NoBom "$cfgDir\config" $configText
 
 Write-Ok "Default agent: $chosen"
 Write-Ok "Delete behaviour: ask (prompt + move to Recycle Bin)"
