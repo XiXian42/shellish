@@ -99,6 +99,20 @@ do
   fi
 done
 
+for f in \
+  "${LIB}/context.js" \
+  "${LIB}/render.js" \
+  "${LIB}/run.js" \
+  "${LIB}/shellish-cmd.js"
+do
+  TOTAL=$((TOTAL+1))
+  if node --check "$f" >/dev/null 2>&1; then
+    pass "syntax ok: $(basename "$f")"
+  else
+    fail "syntax error: $f"
+  fi
+done
+
 # ══════════════════════════════════════════════════════════════════════════════
 section "2 · CONFIG — read / write"
 # ══════════════════════════════════════════════════════════════════════════════
@@ -228,10 +242,10 @@ section "6 · CLI --from-shell routing"
 info "Testing --from-shell: typo should exit 127, NL should call agent"
 echo ""
 
-# typo → exit 127, stderr contains "command not found"
+# typo → exit 127, stdout shows the corrected command but does not run it
 TOTAL=$((TOTAL+1))
 actual_exit=0
-actual_stderr=$("$BIN" --from-shell "gti status" 2>&1 >/dev/null) || actual_exit=$?
+actual_out=$("$BIN" --from-shell "gti status" 2>&1) || actual_exit=$?
 if [[ "$actual_exit" == "127" ]]; then
   pass "--from-shell typo exits 127"
 else
@@ -239,10 +253,10 @@ else
 fi
 
 TOTAL=$((TOTAL+1))
-if echo "$actual_stderr" | grep -qi "command not found"; then
-  pass "--from-shell typo prints 'command not found'"
+if echo "$actual_out" | grep -qi "did you mean" && echo "$actual_out" | grep -qi "git status"; then
+  pass "--from-shell typo suggests corrected command"
 else
-  fail "--from-shell typo: expected 'command not found' in stderr, got: $actual_stderr"
+  fail "--from-shell typo: expected corrected command suggestion, got: $actual_out"
 fi
 
 # NL → agent is invoked (pi will run and produce output, exit 0)
@@ -300,6 +314,78 @@ else
   fail "no agent configured: expected setup prompt, got: $no_agent_out"
 fi
 config_set agent pi   # restore
+
+# ══════════════════════════════════════════════════════════════════════════════
+section "9 · RENDERER REGRESSIONS"
+# ══════════════════════════════════════════════════════════════════════════════
+
+TMP_RENDER_DIR="/tmp/shellish-render-test-$$"
+rm -rf "$TMP_RENDER_DIR"
+mkdir -p "$TMP_RENDER_DIR/fake-bin" "$TMP_RENDER_DIR/home"
+
+FAKE_CLAUDE_LOG="$TMP_RENDER_DIR/claude.log"
+cat > "$TMP_RENDER_DIR/fake-bin/claude" <<'EOF'
+#!/usr/bin/env bash
+LOG_FILE="${FAKE_CLAUDE_LOG:?}"
+{
+  echo "--- claude ---"
+  for a in "$@"; do printf 'arg: %s\n' "$a"; done
+} >> "$LOG_FILE"
+printf '%s\n' \
+  '{"type":"stream_event","event":{"type":"message_start"}}' \
+  '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"he"}}}' \
+  '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"llo"}}}' \
+  '{"type":"stream_event","event":{"type":"message_stop"}}' \
+  '{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}'
+EOF
+chmod +x "$TMP_RENDER_DIR/fake-bin/claude"
+
+CLAUDE_OUT="$TMP_RENDER_DIR/claude.out"
+FAKE_CLAUDE_LOG="$FAKE_CLAUDE_LOG" HOME="$TMP_RENDER_DIR/home" PATH="$TMP_RENDER_DIR/fake-bin:$PATH" \
+  node "$LIB/run.js" claude "$TESTDIR" "say hello" >"$CLAUDE_OUT" 2>&1 || true
+
+TOTAL=$((TOTAL+1))
+if grep -q -- "--include-partial-messages" "$FAKE_CLAUDE_LOG" \
+   && [[ "$(grep -c '^hello$' "$CLAUDE_OUT")" == "1" ]]; then
+  pass "claude partial stream renders once and passes partial flag"
+else
+  fail "claude renderer/regression output unexpected"
+  cat "$FAKE_CLAUDE_LOG"
+  cat "$CLAUDE_OUT"
+fi
+
+FAKE_OMP_LOG="$TMP_RENDER_DIR/omp.log"
+cat > "$TMP_RENDER_DIR/fake-bin/omp" <<'EOF'
+#!/usr/bin/env bash
+LOG_FILE="${FAKE_OMP_LOG:?}"
+{
+  echo "--- omp ---"
+  for a in "$@"; do printf 'arg: %s\n' "$a"; done
+} >> "$LOG_FILE"
+printf '%s\n' \
+  '{"type":"turn_start"}' \
+  '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"omp ok"}}' \
+  '{"type":"agent_end","messages":[{"role":"user","content":[{"type":"text","text":"prompt"}]}]}'
+EOF
+chmod +x "$TMP_RENDER_DIR/fake-bin/omp"
+
+OMP_OUT="$TMP_RENDER_DIR/omp.out"
+FAKE_OMP_LOG="$FAKE_OMP_LOG" HOME="$TMP_RENDER_DIR/home" PATH="$TMP_RENDER_DIR/fake-bin:$PATH" \
+  node "$LIB/run.js" omp "$TESTDIR" "say hello" >"$OMP_OUT" 2>&1 || true
+
+TOTAL=$((TOTAL+1))
+if grep -q -- "--mode" "$FAKE_OMP_LOG" \
+   && grep -q -- "json" "$FAKE_OMP_LOG" \
+   && grep -q '^omp ok$' "$OMP_OUT" \
+   && ! grep -q '"messages"' "$OMP_OUT"; then
+  pass "omp json stream suppresses final transcript payload"
+else
+  fail "omp renderer/regression output unexpected"
+  cat "$FAKE_OMP_LOG"
+  cat "$OMP_OUT"
+fi
+
+rm -rf "$TMP_RENDER_DIR"
 
 # ══════════════════════════════════════════════════════════════════════════════
 section "RESULTS"
