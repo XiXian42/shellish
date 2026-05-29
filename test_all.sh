@@ -344,14 +344,22 @@ CLAUDE_OUT="$TMP_RENDER_DIR/claude.out"
 FAKE_CLAUDE_LOG="$FAKE_CLAUDE_LOG" HOME="$TMP_RENDER_DIR/home" PATH="$TMP_RENDER_DIR/fake-bin:$PATH" \
   node "$LIB/run.js" claude "$TESTDIR" "say hello" >"$CLAUDE_OUT" 2>&1 || true
 
+CLAUDE_HISTORY_FILE=$(find "$TMP_RENDER_DIR/home/.shellish/history" -type f -name '*.jsonl' 2>/dev/null | head -1 || true)
+CLAUDE_HISTORY_REPLY=""
+if [[ -n "$CLAUDE_HISTORY_FILE" ]]; then
+  CLAUDE_HISTORY_REPLY=$(tail -1 "$CLAUDE_HISTORY_FILE" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reply||"")}catch{}})')
+fi
+
 TOTAL=$((TOTAL+1))
 if grep -q -- "--include-partial-messages" "$FAKE_CLAUDE_LOG" \
-   && [[ "$(grep -c '^hello$' "$CLAUDE_OUT")" == "1" ]]; then
-  pass "claude partial stream renders once and passes partial flag"
+   && [[ "$(grep -c '^hello$' "$CLAUDE_OUT")" == "1" ]] \
+   && [[ "$CLAUDE_HISTORY_REPLY" == "hello" ]]; then
+  pass "claude partial stream renders once, passes partial flag, saves history once"
 else
-  fail "claude renderer/regression output unexpected"
+  fail "claude renderer/history regression output unexpected"
   cat "$FAKE_CLAUDE_LOG"
   cat "$CLAUDE_OUT"
+  [[ -n "$CLAUDE_HISTORY_FILE" ]] && cat "$CLAUDE_HISTORY_FILE"
 fi
 
 FAKE_OMP_LOG="$TMP_RENDER_DIR/omp.log"

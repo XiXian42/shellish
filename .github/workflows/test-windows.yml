@@ -126,6 +126,38 @@ jobs:
           if ($out -match "Instructions") { Write-Host "context.js OK" }
           else { Write-Error "context.js unexpected output"; exit 1 }
 
+      - name: Test renderer regressions on Windows
+        run: |
+          $claudeEvents = @(
+            '{"type":"stream_event","event":{"type":"message_start"}}',
+            '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"he"}}}',
+            '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"llo"}}}',
+            '{"type":"stream_event","event":{"type":"message_stop"}}',
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}'
+          )
+          $claudeOut = ($claudeEvents -join "`n") | node lib\render.js --agent claude
+          if (($claudeOut | Select-String -Pattern "hello" -AllMatches).Matches.Count -ne 1) {
+            Write-Error "Claude partial stream should render exactly once: $claudeOut"
+            exit 1
+          }
+
+          $typoEvents = @(
+            '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"__TYPO__: git"}}',
+            '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" status"}}',
+            '{"type":"agent_end"}'
+          )
+          $typoOut = ($typoEvents -join "`n") | node lib\render.js --agent pi
+          if ($LASTEXITCODE -ne 127) {
+            Write-Error "Typo sentinel should exit 127, got $LASTEXITCODE"
+            exit 1
+          }
+          if ($typoOut -notmatch "git status") {
+            Write-Error "Typo sentinel should preserve full corrected command: $typoOut"
+            exit 1
+          }
+          $global:LASTEXITCODE = 0
+          Write-Host "renderer regressions OK"
+
       - name: Test safe-rm.js (no-op, allow mode)
         run: |
           $env:SHELLISH_CONFIRM_DANGER = "allow"
