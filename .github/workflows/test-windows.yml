@@ -138,6 +138,7 @@ jobs:
 
       - name: Test renderer regressions on Windows
         run: |
+          $PSNativeCommandUseErrorActionPreference = $false
           $claudeEvents = @(
             '{"type":"stream_event","event":{"type":"message_start"}}',
             '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"he"}}}',
