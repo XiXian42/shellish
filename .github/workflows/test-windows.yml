@@ -138,36 +138,48 @@ jobs:
 
       - name: Test renderer regressions on Windows
         run: |
-          $PSNativeCommandUseErrorActionPreference = $false
-          $claudeEvents = @(
+          @'
+          const { spawnSync } = require('child_process');
+
+          function runRender(agent, lines) {
+            return spawnSync(process.execPath, ['lib/render.js', '--agent', agent], {
+              input: lines.join('\n') + '\n',
+              encoding: 'utf8',
+            });
+          }
+
+          const claude = runRender('claude', [
             '{"type":"stream_event","event":{"type":"message_start"}}',
             '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"he"}}}',
             '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"llo"}}}',
             '{"type":"stream_event","event":{"type":"message_stop"}}',
-            '{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}'
-          )
-          $claudeOut = ($claudeEvents -join "`n") | node lib\render.js --agent claude
-          if (($claudeOut | Select-String -Pattern "hello" -AllMatches).Matches.Count -ne 1) {
-            Write-Error "Claude partial stream should render exactly once: $claudeOut"
-            exit 1
+            '{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}',
+          ]);
+          const helloCount = (claude.stdout.match(/hello/g) || []).length;
+          if (claude.status !== 0 || helloCount !== 1) {
+            console.error('Claude renderer regression failed');
+            console.error('status=', claude.status);
+            console.error('stdout=', JSON.stringify(claude.stdout));
+            console.error('stderr=', claude.stderr);
+            process.exit(1);
           }
 
-          $typoEvents = @(
+          const typo = runRender('pi', [
             '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"__TYPO__: git"}}',
             '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" status"}}',
-            '{"type":"agent_end"}'
-          )
-          $typoOut = ($typoEvents -join "`n") | node lib\render.js --agent pi
-          if ($LASTEXITCODE -ne 127) {
-            Write-Error "Typo sentinel should exit 127, got $LASTEXITCODE"
-            exit 1
+            '{"type":"agent_end"}',
+          ]);
+          if (typo.status !== 127 || !typo.stdout.includes('git status')) {
+            console.error('Typo renderer regression failed');
+            console.error('status=', typo.status);
+            console.error('stdout=', JSON.stringify(typo.stdout));
+            console.error('stderr=', typo.stderr);
+            process.exit(1);
           }
-          if ($typoOut -notmatch "git status") {
-            Write-Error "Typo sentinel should preserve full corrected command: $typoOut"
-            exit 1
-          }
-          $global:LASTEXITCODE = 0
-          Write-Host "renderer regressions OK"
+
+          console.log('renderer regressions OK');
+          '@ | Set-Content renderer-regression.js
+          node renderer-regression.js
 
       - name: Test safe-rm.js (no-op, allow mode)
         run: |
