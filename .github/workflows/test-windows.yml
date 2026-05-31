@@ -90,7 +90,7 @@ jobs:
 
       - name: Simulate config + test CLI
         run: |
-          $cfgDir = "$env:USERPROFILE\.config\shellish"
+          $cfgDir = "$env:APPDATA\shellish"
           New-Item -ItemType Directory -Force $cfgDir | Out-Null
           [System.IO.File]::WriteAllText(
             "$cfgDir\config",
@@ -104,7 +104,10 @@ jobs:
       - name: Test legacy UTF-16 config is readable
         shell: powershell
         run: |
+          $appCfg = "$env:APPDATA\shellish\config"
+          if (Test-Path $appCfg) { Remove-Item $appCfg -Force }
           $cfgDir = "$env:USERPROFILE\.config\shellish"
+          New-Item -ItemType Directory -Force $cfgDir | Out-Null
           [System.IO.File]::WriteAllText("$cfgDir\config", "agent=codex`nconfirm_danger=ask`n", [System.Text.Encoding]::Unicode)
           node lib\shellish-cmd.js status
 
@@ -125,6 +128,13 @@ jobs:
           $out = node lib\context.js build $PWD "list files"
           if ($out -match "Instructions") { Write-Host "context.js OK" }
           else { Write-Error "context.js unexpected output"; exit 1 }
+
+      - name: Test SHELLISH_HOME override
+        run: |
+          $env:SHELLISH_HOME = "$env:TEMP\shellish-home-ci"
+          $out = node lib\context.js build $PWD "remember test"
+          if ($out -match [regex]::Escape($env:SHELLISH_HOME)) { Write-Host "SHELLISH_HOME override OK" }
+          else { Write-Error "SHELLISH_HOME override not reflected in prompt"; exit 1 }
 
       - name: Test renderer regressions on Windows
         run: |

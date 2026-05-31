@@ -41,9 +41,21 @@ $ delete the build directory
 curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
 ```
 
-**Windows (PowerShell)**
+**Windows (PowerShell, beta)**
 ```powershell
 irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
+```
+
+If PowerShell blocks the hook with "running scripts is disabled", enable user scripts once:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+If your Windows home directory is restricted, set a writable data directory before running shellish:
+
+```powershell
+$env:SHELLISH_HOME = "$env:APPDATA\shellish"
 ```
 
 The installer will:
@@ -96,7 +108,7 @@ $ remember I'm based in London and use neovim
 Got it.
 ```
 
-Memory lives in `~/.shellish/memory.md` — edit it directly anytime.
+Memory lives in `~/.shellish/memory.md` on macOS/Linux and `%APPDATA%\shellish\memory.md` on Windows. You can override it with `SHELLISH_HOME`.
 
 ### Commands
 
@@ -130,7 +142,7 @@ call agent (pi / omp / claude / codex)
   ↓
 stream-render output
   ↓
-save to ~/.shellish/history/
+save to shellish data history/ (`~/.shellish` or `%APPDATA%\shellish`)
 ```
 
 On delete: `rm` is replaced by safe-rm which moves files to trash.  
@@ -185,9 +197,21 @@ $ 删除 build 目录
 curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
 ```
 
-**Windows（PowerShell）**
+**Windows（PowerShell，beta）**
 ```powershell
 irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
+```
+
+如果 PowerShell 提示 `running scripts is disabled`，需要为当前用户开启脚本执行：
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+如果 Windows 用户目录受限，可以先指定一个可写的数据目录：
+
+```powershell
+$env:SHELLISH_HOME = "$env:APPDATA\shellish"
 ```
 
 安装过程会自动：
@@ -240,7 +264,7 @@ $ 记住我在北京，用 vim
 已记住。
 ```
 
-memory 存在 `~/.shellish/memory.md`，可以直接编辑。
+memory 在 macOS/Linux 存在 `~/.shellish/memory.md`，Windows 存在 `%APPDATA%\shellish\memory.md`。也可以用 `SHELLISH_HOME` 指定位置。
 
 ### 命令
 
@@ -274,7 +298,7 @@ LLM 判断：typo → 显示纠正  /  自然语言 → 继续
   ↓
 流式渲染输出
   ↓
-保存历史到 ~/.shellish/history/
+保存历史到 shellish 数据目录 history/（`~/.shellish` 或 `%APPDATA%\shellish`）
 ```
 
 删除文件时：`rm` 被替换为 safe-rm，移入回收站而非直接删除。macOS 用 `trash` CLI，Linux 遵循 freedesktop Trash spec。

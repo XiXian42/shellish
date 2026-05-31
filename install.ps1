@@ -19,6 +19,7 @@ function Write-Ok($msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
 function Write-Err($msg)  { Write-Host "  ✗ $msg" -ForegroundColor Red }
 function Write-Info($msg) { Write-Host "  → $msg" -ForegroundColor Cyan }
 function Write-Dim($msg)  { Write-Host "    $msg" -ForegroundColor DarkGray }
+function Write-Warn($msg) { Write-Host "  ! $msg" -ForegroundColor Yellow }
 function Write-Utf8NoBom($path, $text) {
     $enc = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($path, $text, $enc)
@@ -132,7 +133,7 @@ if ($idx -lt 0 -or $idx -ge $agents.Count) { $idx = 0 }
 $chosen = $agents[$idx]
 
 # ── save config ───────────────────────────────────────────────────────────────
-$cfgDir = "$env:USERPROFILE\.config\shellish"
+$cfgDir = "$env:APPDATA\shellish"
 New-Item -ItemType Directory -Force $cfgDir | Out-Null
 $configText = @"
 agent=$chosen
@@ -142,6 +143,7 @@ Write-Utf8NoBom "$cfgDir\config" $configText
 
 Write-Ok "Default agent: $chosen"
 Write-Ok "Delete behaviour: ask (prompt + move to Recycle Bin)"
+Write-Ok "Data directory: $env:APPDATA\shellish"
 
 # ── install PowerShell hook ───────────────────────────────────────────────────
 $profileDir  = Split-Path $PROFILE
@@ -162,6 +164,19 @@ if (Test-Path $profileFile) {
     Set-Content $profileFile $hookLine
     Write-Ok "Created $profileFile with shellish hook"
 }
+
+# ── execution policy guidance ─────────────────────────────────────────────────
+try {
+    $effectivePolicy = Get-ExecutionPolicy
+    $currentUserPolicy = Get-ExecutionPolicy -Scope CurrentUser
+    if ($effectivePolicy -in @('Restricted', 'AllSigned') -or $currentUserPolicy -in @('Restricted', 'AllSigned')) {
+        Write-Host ""
+        Write-Warn "PowerShell execution policy may block the shellish hook."
+        Write-Dim "Effective policy: $effectivePolicy; CurrentUser: $currentUserPolicy"
+        Write-Dim "Recommended: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
+        Write-Dim "Temporary test: powershell -ExecutionPolicy Bypass"
+    }
+} catch { }
 
 # ── done ──────────────────────────────────────────────────────────────────────
 Write-Host ""
