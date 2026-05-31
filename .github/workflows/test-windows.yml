@@ -45,14 +45,16 @@ jobs:
             Write-Host "  OK  $f"
           }
 
-      - name: Syntax check install.ps1
+      - name: Syntax check PowerShell scripts
         run: |
-          $errors = $null
-          $null = [System.Management.Automation.Language.Parser]::ParseFile(
-            "$PWD\install.ps1", [ref]$null, [ref]$errors
-          )
-          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
-          Write-Host "install.ps1 syntax OK"
+          foreach ($f in @("install.ps1", "uninstall.ps1")) {
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              "$PWD\$f", [ref]$null, [ref]$errors
+            )
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error "${f}: $($_.Message)" }; exit 1 }
+            Write-Host "$f syntax OK"
+          }
 
       - name: Syntax check profile.ps1
         run: |
@@ -81,7 +83,8 @@ jobs:
             "lib\render.js",
             "lib\context.js",
             "shell\profile.ps1",
-            "install.ps1"
+            "install.ps1",
+            "uninstall.ps1"
           )
           foreach ($f in $files) {
             if (Test-Path $f) { Write-Host "  OK  $f" }

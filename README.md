@@ -121,8 +121,14 @@ shellish uninstall-hook  # remove shell hook
 
 ### Uninstall
 
+**macOS / Linux**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/uninstall.sh | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://raw.githubusercontent.com/XiXian42/shellish/main/uninstall.ps1 | iex
 ```
 
 ### How it works
@@ -277,8 +283,14 @@ shellish uninstall-hook  # 移除 shell hook
 
 ### 卸载
 
+**macOS / Linux**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/uninstall.sh | bash
+```
+
+**Windows（PowerShell）**
+```powershell
+irm https://raw.githubusercontent.com/XiXian42/shellish/main/uninstall.ps1 | iex
 ```
 
 ### 工作原理
