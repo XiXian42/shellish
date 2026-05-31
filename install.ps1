@@ -127,8 +127,16 @@ for ($i = 0; $i -lt $agents.Count; $i++) {
     Write-Host ("    {0}) {1,-10}  {2}" -f ($i+1), $a, $descs[$a]) -ForegroundColor DarkGray
 }
 Write-Host ""
-$choice = Read-Host "  Your choice [1-$($agents.Count), default=1]"
-$idx = [int]($choice -replace '\D','') - 1
+$choiceRaw = ''
+try {
+    if (-not [Console]::IsInputRedirected) {
+        $choiceRaw = Read-Host "  Your choice [1-$($agents.Count), default=1]"
+    }
+} catch { $choiceRaw = '' }
+$choice = "$choiceRaw".Trim()
+$digits = ($choice -replace '[^\d]', '')
+if ([string]::IsNullOrWhiteSpace($digits)) { $idx = 0 }
+else { $idx = [int]$digits - 1 }
 if ($idx -lt 0 -or $idx -ge $agents.Count) { $idx = 0 }
 $chosen = $agents[$idx]
 
@@ -146,9 +154,14 @@ Write-Ok "Delete behaviour: ask (prompt + move to Recycle Bin)"
 Write-Ok "Data directory: $env:APPDATA\shellish"
 
 # ── install PowerShell hook ───────────────────────────────────────────────────
-$profileDir  = Split-Path $PROFILE
-$profileFile = $PROFILE
-New-Item -ItemType Directory -Force $profileDir | Out-Null
+# $PROFILE is usually a string, but it also exposes profile-path properties.
+# Be explicit to avoid odd host/non-interactive cases.
+$profileFile = $PROFILE.CurrentUserCurrentHost
+if ([string]::IsNullOrWhiteSpace($profileFile)) { $profileFile = [string]$PROFILE }
+$profileDir = Split-Path -Parent $profileFile
+if (-not (Test-Path $profileDir)) {
+    New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+}
 
 $hookLine = "`n# shellish hook`n. `"$INSTALL_DIR\shell\profile.ps1`"`n"
 
