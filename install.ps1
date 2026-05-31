@@ -41,24 +41,22 @@ if (Test-Path $INSTALL_DIR) {
     Remove-Item -Recurse -Force $INSTALL_DIR
 }
 
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    # Git writes normal progress to stderr. In Windows PowerShell 5.1,
-    # piping native stderr with $ErrorActionPreference='Stop' can turn that
-    # harmless progress into NativeCommandError. Run quietly and check exit.
-    & git clone --quiet --depth=1 $REPO $INSTALL_DIR
-    if ($LASTEXITCODE -ne 0) {
-        throw "git clone failed with exit code $LASTEXITCODE"
-    }
-} else {
-    # Fallback: download zip
-    $zip = "$env:TEMP\shellish.zip"
-    $src = "$env:TEMP\shellish-src"
-    if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+# Windows installer intentionally uses the GitHub zip archive instead of git.
+# This avoids requiring Git, avoids PowerShell 5.1 native-stderr quirks, and
+# avoids corporate/locked-down machines trying to install extra tooling.
+$zip = Join-Path $env:TEMP "shellish.zip"
+$src = Join-Path $env:TEMP "shellish-src"
+if (Test-Path $zip) { Remove-Item $zip -Force }
+if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+
+try {
+    $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest "$REPO/archive/refs/heads/main.zip" -OutFile $zip
     Expand-Archive $zip $src -Force
     Move-Item "$src\shellish-main" $INSTALL_DIR
-    Remove-Item $zip -Force
-    Remove-Item $src -Recurse -Force
+} finally {
+    if (Test-Path $zip) { Remove-Item $zip -Force }
+    if (Test-Path $src) { Remove-Item -Recurse -Force $src }
 }
 
 Write-Ok "Downloaded to $INSTALL_DIR"
