@@ -53,10 +53,8 @@ function Remove-FromUserPath($target) {
 function Remove-HookFromProfile($profilePath) {
     if (-not (Test-Path $profilePath)) { return }
     $src = Get-Content $profilePath -Raw
-    if ($src -notlike '*shellish*') { return }
-
-    $pattern = '(?ms)\r?\n?# shellish hook\r?\n\.\s+".*?shellish[\\/]+shell[\\/]+profile\.ps1"\r?\n?'
-    $cleaned = [regex]::Replace($src, $pattern, "`n")
+    $cleaned = [regex]::Replace($src, '(?ms)\r?\n?# >>> shellish hook >>>.*?# <<< shellish hook <<<\r?\n?', "`n")
+    $cleaned = [regex]::Replace($cleaned, '(?ms)\r?\n?# shellish hook\r?\n\.\s+".*?shellish[\\/]+shell[\\/]+profile\.ps1"\r?\n?', "`n")
 
     if ($cleaned -ne $src) {
         Set-Content $profilePath $cleaned
@@ -76,7 +74,7 @@ if ($confirm -notin @('y','Y')) {
 $profiles = @(
     "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
     "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
-)
+) | Select-Object -Unique
 foreach ($p in $profiles) { Remove-HookFromProfile $p }
 
 # Remove install bin from PATH.
@@ -90,8 +88,10 @@ if (Test-Path $INSTALL_DIR) {
     Write-Dim "$INSTALL_DIR not found"
 }
 
-# Warn about stale copies created by old installers, but do not delete files we
-# cannot prove belong to this install.
+# Warn about stale copies created by old installers, and remove any we can
+# prove belong to shellish (the marker comment disambiguates from user files
+# that happen to be named shellish.cmd). Pre-0.1 installers left shims in
+# System32, %APPDATA%\npm, and %USERPROFILE%\bin; clean those up too.
 try {
     $cmds = @(Get-Command shellish.cmd -All -ErrorAction SilentlyContinue)
     foreach ($c in $cmds) {
@@ -101,6 +101,32 @@ try {
         }
     }
 } catch { }
+
+$staleCandidates = @(
+    "$env:SystemRoot\System32\shellish.cmd",
+    "$env:APPDATA\npm\shellish.cmd",
+    "$env:USERPROFILE\bin\shellish.cmd"
+)
+# Only remove files that look like *our* shim, not a coincidental
+# filename. Real shellish shims reference the install path or one of
+# the project URLs. `safe-rm.js` is unique to us.
+$shimMarker = '(?i)(XiXian42/shellish|safe-rm\.js|shellish safe delete entry point)'
+foreach ($p in $staleCandidates) {
+    if (Test-Path $p) {
+        $content = ''
+        try { $content = Get-Content $p -Raw -ErrorAction SilentlyContinue } catch { }
+        if ($content -and $content -match $shimMarker) {
+            try {
+                Remove-Item $p -Force
+                Write-Ok "Removed stale shellish shim: $p"
+            } catch {
+                Write-Warn "Could not remove stale shim $p: $($_.Exception.Message)"
+            }
+        } elseif ($content) {
+            Write-Dim "Skipping non-shellish file at $p"
+        }
+    }
+}
 
 # Data/config is user-owned. Keep by default.
 if ((Test-Path $DATA_DIR) -or (Test-Path $LEGACY_CFG)) {

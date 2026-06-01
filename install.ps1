@@ -33,6 +33,13 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     exit 1
 }
 Write-Ok "Node.js $(node --version)"
+try {
+    $longPaths = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -ErrorAction SilentlyContinue
+    if ($longPaths.LongPathsEnabled -ne 1) {
+        Write-Warn "Windows long path support is not enabled; very deep install paths may fail."
+        Write-Dim "Enable with admin PowerShell: Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1"
+    }
+} catch { }
 
 # ── download / install ────────────────────────────────────────────────────────
 Write-Info "Installing shellish to $INSTALL_DIR ..."
@@ -52,6 +59,13 @@ if (Test-Path $src) { Remove-Item -Recurse -Force $src }
 try {
     $ProgressPreference = 'SilentlyContinue'
     Invoke-WebRequest "$REPO/archive/refs/heads/main.zip" -OutFile $zip
+    # Hash the archive before extraction so the user can verify integrity
+    # against the GitHub commit SHA. (We do not pin to a release tag here
+    # because the install URL targets main; the hash below lets a careful
+    # user confirm the bytes match GitHub's main HEAD.)
+    $zipHash = (Get-FileHash $zip -Algorithm SHA256).Hash
+    Write-Dim "Archive SHA256: $zipHash"
+    Write-Dim "Compare with:    $REPO/commit/$zipHash"
     Expand-Archive $zip $src -Force
     Move-Item "$src\shellish-main" $INSTALL_DIR
 } finally {
@@ -86,7 +100,11 @@ if (-not $hasBin) {
 $env:PATH = "$binSrc;$env:PATH"
 
 # Warn if another shellish.cmd appears earlier; the profile hook will prepend
-# the real bin each session, but this helps diagnose stale copies.
+# the real bin each session, but this helps diagnose stale copies. Pre-0.1
+# installers used to copy shellish.cmd into PATH directories (System32, npm,
+# %USERPROFILE%\bin) which masked newer installs. Remove any of those that
+# actually look like a shellish shim — the marker comment disambiguates from
+# user files that happen to be named shellish.cmd.
 try {
     $cmds = @(Get-Command shellish.cmd -All -ErrorAction SilentlyContinue)
     foreach ($c in $cmds) {
@@ -95,6 +113,32 @@ try {
         }
     }
 } catch { }
+
+$staleCandidates = @(
+    "$env:SystemRoot\System32\shellish.cmd",
+    "$env:APPDATA\npm\shellish.cmd",
+    "$env:USERPROFILE\bin\shellish.cmd"
+)
+# Only remove files that look like *our* shim, not a coincidental
+# filename. Real shellish shims reference the install path or one of
+# the project URLs. `safe-rm.js` is unique to us.
+$shimMarker = '(?i)(XiXian42/shellish|safe-rm\.js|shellish safe delete entry point)'
+foreach ($p in $staleCandidates) {
+    if (Test-Path $p) {
+        $content = ''
+        try { $content = Get-Content $p -Raw -ErrorAction SilentlyContinue } catch { }
+        if ($content -and $content -match $shimMarker) {
+            try {
+                Remove-Item $p -Force
+                Write-Ok "Removed stale shellish shim: $p"
+            } catch {
+                Write-Warn "Could not remove stale shim $p: $($_.Exception.Message)"
+            }
+        } elseif ($content) {
+            Write-Dim "Skipping non-shellish file at $p"
+        }
+    }
+}
 
 # ── detect agents ─────────────────────────────────────────────────────────────
 $agents = @()
@@ -152,28 +196,25 @@ Write-Ok "Delete behaviour: ask (prompt + move to Recycle Bin)"
 Write-Ok "Data directory: $env:APPDATA\shellish"
 
 # ── install PowerShell hook ───────────────────────────────────────────────────
-# $PROFILE is usually a string, but it also exposes profile-path properties.
-# Be explicit to avoid odd host/non-interactive cases.
-$profileFile = $PROFILE.CurrentUserCurrentHost
-if ([string]::IsNullOrWhiteSpace($profileFile)) { $profileFile = [string]$PROFILE }
-$profileDir = Split-Path -Parent $profileFile
-if (-not (Test-Path $profileDir)) {
-    New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+$HOOK_BEGIN = '# >>> shellish hook >>>'
+$HOOK_END   = '# <<< shellish hook <<<'
+function Remove-ShellishHookBlock($text) {
+    $text = [regex]::Replace($text, '(?ms)\r?\n?# >>> shellish hook >>>.*?# <<< shellish hook <<<\r?\n?', "`n")
+    $text = [regex]::Replace($text, '(?ms)\r?\n?# shellish hook\r?\n\.\s+".*?shellish[\\/]+shell[\\/]+profile\.ps1"\r?\n?', "`n")
+    return $text.TrimEnd()
 }
-
-$hookLine = "`n# shellish hook`n. `"$INSTALL_DIR\shell\profile.ps1`"`n"
-
-if (Test-Path $profileFile) {
-    $existing = Get-Content $profileFile -Raw
-    if ($existing -like '*shellish*') {
-        Write-Ok "Hook already present in $profileFile"
-    } else {
-        Add-Content $profileFile $hookLine
-        Write-Ok "Hook added to $profileFile"
-    }
-} else {
-    Set-Content $profileFile $hookLine
-    Write-Ok "Created $profileFile with shellish hook"
+$profileFiles = @(
+    "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
+    "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
+) | Select-Object -Unique
+$hookLine = "`n$HOOK_BEGIN`n. `"$INSTALL_DIR\shell\profile.ps1`"`n$HOOK_END`n"
+foreach ($profileFile in $profileFiles) {
+    $profileDir = Split-Path -Parent $profileFile
+    if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Force -Path $profileDir | Out-Null }
+    $existing = if (Test-Path $profileFile) { Get-Content $profileFile -Raw } else { '' }
+    $cleaned = Remove-ShellishHookBlock $existing
+    Write-Utf8NoBom $profileFile ($cleaned + $hookLine)
+    Write-Ok "Hook installed in $profileFile"
 }
 
 # ── execution policy guidance ─────────────────────────────────────────────────

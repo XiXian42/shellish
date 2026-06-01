@@ -78,6 +78,8 @@ Restart your shell to activate.
 
 shellish uses whatever is already on your system — it won't install agents for you.
 
+> **Before first use**: complete login / authentication for your agent **outside of shellish** (e.g. run `claude` once and finish the browser OAuth flow, or `codex login`). shellish's `agent health` check in `shellish status` will surface this; an un-authenticated agent fails with a confusing error if you skip this step.
+
 ### Usage
 
 After installing the hook, just type at the prompt:
