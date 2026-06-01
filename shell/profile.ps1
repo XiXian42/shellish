@@ -30,7 +30,9 @@ if (Test-Path $global:_shellishBin) {
         [Console]::InputEncoding  = $utf8
         [Console]::OutputEncoding = $utf8
         $OutputEncoding           = $utf8
-    } catch { /* non-fatal */ }
+    } catch {
+        # non-fatal
+    }
 
     # Prefer the real install entrypoint for this PowerShell session. This avoids
     # stale/broken copies of shellish.cmd in earlier PATH directories.
@@ -184,13 +186,36 @@ if (Test-Path $global:_shellishBin) {
     # definitions without warning.
     function global:Remove-Item {
         # No [CmdletBinding()] on purpose: with it, PowerShell would
-        # silently drop unbound common parameters like -WhatIf, -Verbose,
-        # -ErrorAction, etc. We want to forward everything verbatim to
+        # silently drop unbound common parameters like -Verbose,
+        # -ErrorAction, etc. We want to forward most arguments verbatim to
         # `shellish-trash`, including any flags the user (or agent) added.
-        # Safe-rm's parseRmArgs strips the leading-dash flags it does
-        # not understand, so this round-trip is safe.
+        # Exception: -WhatIf is a dry-run contract in PowerShell; never
+        # convert it into a real trash operation.
         param([Parameter(ValueFromRemainingArguments=$true)] [object[]] $Args)
-        & shellish-trash @Args
+        $argv = @($Args)
+        $hasWhatIf = $false
+        $passthrough = @()
+        foreach ($a in $argv) {
+            $s = if ($a -is [string]) { $a } else { [string]$a }
+            # Treat bare -WhatIf / -wi / -WhatIf:$true as the dry-run signal.
+            if ($s -match '^-(?i:WhatIf|wi)(\$|:.*)?$') {
+                $hasWhatIf = $true
+                continue
+            }
+            $passthrough += $a
+        }
+        if ($hasWhatIf) {
+            # Honor the dry-run contract: print what would have been trashed
+            # and exit cleanly so scripts depending on -WhatIf still pass.
+            $paths = @($passthrough | Where-Object { $_ -isnot [string] -or $_ -notmatch '^-' })
+            if ($paths.Count -gt 0) {
+                Write-Host ("WhatIf: shellish-trash " + (($paths | ForEach-Object { [string]$_ }) -join ' '))
+            } else {
+                Write-Host "WhatIf: shellish-trash (no paths)"
+            }
+            return
+        }
+        & shellish-trash @passthrough
     }
     # The aliases `rm`, `del`, `erase`, `rmdir`, `rd` all resolve to
     # `Remove-Item`. We rebind them to our wrapper so they hit the

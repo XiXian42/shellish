@@ -82,7 +82,7 @@ Remove-FromUserPath $BIN_DIR
 
 # Remove installed program files.
 if (Test-Path $INSTALL_DIR) {
-    Remove-Item -Recurse -Force $INSTALL_DIR
+    Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $INSTALL_DIR
     Write-Ok "Removed $INSTALL_DIR"
 } else {
     Write-Dim "$INSTALL_DIR not found"
@@ -117,7 +117,7 @@ foreach ($p in $staleCandidates) {
         try { $content = Get-Content $p -Raw -ErrorAction SilentlyContinue } catch { }
         if ($content -and $content -match $shimMarker) {
             try {
-                Remove-Item $p -Force
+                Microsoft.PowerShell.Management\Remove-Item $p -Force
                 Write-Ok "Removed stale shellish shim: $p"
             } catch {
                 Write-Warn "Could not remove stale shim $p: $($_.Exception.Message)"
@@ -133,11 +133,11 @@ if ((Test-Path $DATA_DIR) -or (Test-Path $LEGACY_CFG)) {
     $rmData = Read-Host "  Remove shellish data/config too? [y/N]"
     if ($rmData -in @('y','Y')) {
         if (Test-Path $DATA_DIR) {
-            Remove-Item -Recurse -Force $DATA_DIR
+            Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $DATA_DIR
             Write-Ok "Removed $DATA_DIR"
         }
         if (Test-Path $LEGACY_CFG) {
-            Remove-Item -Recurse -Force $LEGACY_CFG
+            Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $LEGACY_CFG
             Write-Ok "Removed legacy config $LEGACY_CFG"
         }
     } else {

@@ -320,6 +320,30 @@ jobs:
               }
               Write-Host "alias $a -> Remove-Item OK"
           }
+
+      - name: Test Remove-Item wrapper behavior
+        shell: powershell
+        run: |
+          $fakeDir = Join-Path $env:TEMP "shellish-fake-trash"
+          Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $fakeDir -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force $fakeDir | Out-Null
+          $log = Join-Path $fakeDir "args.txt"
+          @'
+@echo off
+echo %*>>"%SHELLISH_FAKE_TRASH_LOG%"
+'@ | Set-Content -Encoding ASCII (Join-Path $fakeDir "shellish-trash.cmd")
+          $env:SHELLISH_FAKE_TRASH_LOG = $log
+          $env:PATH = "$fakeDir;$env:PATH"
+          . "$PWD\shell\profile.ps1"
+          Remove-Item -Recurse foo
+          del bar
+          $content = Get-Content $log -Raw
+          if ($content -notmatch '-Recurse foo') { Write-Error "Remove-Item args not forwarded: $content"; exit 1 }
+          if ($content -notmatch 'bar') { Write-Error "del args not forwarded: $content"; exit 1 }
+          Microsoft.PowerShell.Management\Remove-Item -Force $log
+          Remove-Item baz -WhatIf
+          if (Test-Path $log) { Write-Error "-WhatIf should not call shellish-trash"; exit 1 }
+          Write-Host "Remove-Item wrapper behavior OK"
       - name: Test safe-rm.js (no-op, allow mode)
         run: |
           $env:SHELLISH_CONFIRM_DANGER = "allow"

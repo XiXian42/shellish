@@ -45,7 +45,7 @@ try {
 Write-Info "Installing shellish to $INSTALL_DIR ..."
 
 if (Test-Path $INSTALL_DIR) {
-    Remove-Item -Recurse -Force $INSTALL_DIR
+    Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $INSTALL_DIR
 }
 
 # Windows installer intentionally uses the GitHub zip archive instead of git.
@@ -53,8 +53,8 @@ if (Test-Path $INSTALL_DIR) {
 # avoids corporate/locked-down machines trying to install extra tooling.
 $zip = Join-Path $env:TEMP "shellish.zip"
 $src = Join-Path $env:TEMP "shellish-src"
-if (Test-Path $zip) { Remove-Item $zip -Force }
-if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+if (Test-Path $zip) { Microsoft.PowerShell.Management\Remove-Item $zip -Force }
+if (Test-Path $src) { Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $src }
 
 try {
     $ProgressPreference = 'SilentlyContinue'
@@ -69,8 +69,8 @@ try {
     Expand-Archive $zip $src -Force
     Move-Item "$src\shellish-main" $INSTALL_DIR
 } finally {
-    if (Test-Path $zip) { Remove-Item $zip -Force }
-    if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+    if (Test-Path $zip) { Microsoft.PowerShell.Management\Remove-Item $zip -Force }
+    if (Test-Path $src) { Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $src }
 }
 
 Write-Ok "Downloaded to $INSTALL_DIR"
@@ -129,7 +129,7 @@ foreach ($p in $staleCandidates) {
         try { $content = Get-Content $p -Raw -ErrorAction SilentlyContinue } catch { }
         if ($content -and $content -match $shimMarker) {
             try {
-                Remove-Item $p -Force
+                Microsoft.PowerShell.Management\Remove-Item $p -Force
                 Write-Ok "Removed stale shellish shim: $p"
             } catch {
                 Write-Warn "Could not remove stale shim $p: $($_.Exception.Message)"
