@@ -28,16 +28,18 @@ jobs:
         run: node scripts/test-agent-resolution.js
 
       - name: Test history key (no collisions)
-        run: node -e "
+        run: |
+          node <<'NODE'
           const { safeHistoryKey } = require('./lib/history-key');
-          const a = safeHistoryKey('C:\\\\Users\\\\foo\\\\Projects\\\\app');
-          const b = safeHistoryKey('D:\\\\Users\\\\foo\\\\Projects\\\\app');
+          const a = safeHistoryKey('C:\\Users\\foo\\Projects\\app');
+          const b = safeHistoryKey('D:\\Users\\foo\\Projects\\app');
           if (a === b) { console.error('collision:', a); process.exit(1); }
           console.log('history key OK');
-        "
+          NODE
 
       - name: Test config win (UTF-16LE round-trip)
-        run: node -e "
+        run: |
+          node <<'NODE'
           const fs = require('fs');
           const path = require('path');
           const os = require('os');
@@ -51,7 +53,7 @@ jobs:
           if (got !== 'codex') { console.error('expected codex, got', got); process.exit(1); }
           console.log('UTF-16LE config OK:', got);
           fs.unlinkSync(tmp);
-        "
+          NODE
 
       - name: Test bash entrypoint
         run: |

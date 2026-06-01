@@ -328,10 +328,10 @@ jobs:
           Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $fakeDir -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force $fakeDir | Out-Null
           $log = Join-Path $fakeDir "args.txt"
-          @'
-@echo off
-echo %*>>"%SHELLISH_FAKE_TRASH_LOG%"
-'@ | Set-Content -Encoding ASCII (Join-Path $fakeDir "shellish-trash.cmd")
+          Set-Content -Encoding ASCII (Join-Path $fakeDir "shellish-trash.cmd") -Value @(
+            '@echo off',
+            'echo %*>>"%SHELLISH_FAKE_TRASH_LOG%"'
+          )
           $env:SHELLISH_FAKE_TRASH_LOG = $log
           $env:PATH = "$fakeDir;$env:PATH"
           . "$PWD\shell\profile.ps1"
