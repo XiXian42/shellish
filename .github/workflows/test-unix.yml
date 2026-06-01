@@ -1,0 +1,60 @@
+name: Test (macOS / Linux)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Syntax check JS files
+        run: |
+          for f in lib/ansi.js lib/config-win.js lib/history-key.js lib/agent-resolver.js \
+                   lib/safe-rm.js lib/run.js lib/render.js lib/context.js lib/shellish-cmd.js; do
+            node --check "$f" || (echo "SYNTAX ERROR: $f" && exit 1)
+          done
+          echo "All JS files syntax OK"
+
+      - name: Test agent resolution
+        run: node scripts/test-agent-resolution.js
+
+      - name: Test history key (no collisions)
+        run: node -e "
+          const { safeHistoryKey } = require('./lib/history-key');
+          const a = safeHistoryKey('C:\\\\Users\\\\foo\\\\Projects\\\\app');
+          const b = safeHistoryKey('D:\\\\Users\\\\foo\\\\Projects\\\\app');
+          if (a === b) { console.error('collision:', a); process.exit(1); }
+          console.log('history key OK');
+        "
+
+      - name: Test config win (UTF-16LE round-trip)
+        run: node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const os = require('os');
+          const tmp = path.join(os.tmpdir(), 'shellish-cfg-' + Date.now() + '.txt');
+          // Write UTF-16LE BOM + content
+          const buf = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('agent=codex\n', 'utf16le')]);
+          fs.writeFileSync(tmp, buf);
+          process.env.SHELLISH_CONFIG_FILE = tmp;
+          const cfg = require('./lib/config-win');
+          const got = cfg.get('agent');
+          if (got !== 'codex') { console.error('expected codex, got', got); process.exit(1); }
+          console.log('UTF-16LE config OK:', got);
+          fs.unlinkSync(tmp);
+        "
+
+      - name: Test bash entrypoint
+        run: |
+          chmod +x bin/shellish
+          SHELLISH_DRY_RUN=1 ./bin/shellish "list files" 2>&1 | grep -q "DRY_RUN" || (echo "shellish bash failed" && exit 1)
+          echo "bash entrypoint OK"

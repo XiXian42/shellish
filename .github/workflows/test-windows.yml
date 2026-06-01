@@ -34,7 +34,7 @@ jobs:
 
       - name: Syntax check JS files
         run: |
-          foreach ($f in @("lib/shellish-cmd.js","lib/safe-rm.js","lib/run.js","lib/render.js","lib/context.js")) {
+          foreach ($f in @("lib/shellish-cmd.js","lib/safe-rm.js","lib/run.js","lib/render.js","lib/context.js","lib/config-win.js","lib/ansi.js","lib/history-key.js","lib/agent-resolver.js")) {
             $code = Get-Content $f -Raw
             # Strip shebang so node doesn't choke on #!
             if ($code.StartsWith("#!")) {
@@ -56,14 +56,16 @@ jobs:
             Write-Host "$f syntax OK"
           }
 
-      - name: Syntax check profile.ps1
+      - name: Syntax check PowerShell scripts
         run: |
-          $errors = $null
-          $null = [System.Management.Automation.Language.Parser]::ParseFile(
-            "$PWD\shell\profile.ps1", [ref]$null, [ref]$errors
-          )
-          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
-          Write-Host "profile.ps1 syntax OK"
+          foreach ($f in @("shell\profile.ps1", "bin\shellish.ps1")) {
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              "$PWD\$f", [ref]$null, [ref]$errors
+            )
+            if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error "${f}: $($_.Message)" }; exit 1 }
+            Write-Host "$f syntax OK"
+          }
 
       - name: Load profile.ps1 in Windows PowerShell 5.1
         shell: powershell
@@ -77,14 +79,21 @@ jobs:
         run: |
           $files = @(
             "bin\shellish.cmd",
+            "bin\shellish.ps1",
+            "bin\shellish-trash.cmd",
+            "bin\shellish-rm.cmd",
             "lib\shellish-cmd.js",
+            "lib\config-win.js",
+            "lib\ansi.js",
+            "lib\history-key.js",
             "lib\safe-rm.js",
             "lib\run.js",
             "lib\render.js",
             "lib\context.js",
             "shell\profile.ps1",
             "install.ps1",
-            "uninstall.ps1"
+            "uninstall.ps1",
+            "lib\agent-resolver.js"
           )
           foreach ($f in $files) {
             if (Test-Path $f) { Write-Host "  OK  $f" }
@@ -126,11 +135,25 @@ jobs:
           findstr /C:"DRY_RUN fromShell=1" out.txt
           if %ERRORLEVEL% NEQ 0 exit /b 1
 
+      - name: Test PowerShell entrypoint preserves special characters
+        shell: pwsh
+        env:
+          SHELLISH_DRY_RUN: "1"
+        run: |
+          $prompt = 'find files containing a & b | c > d < e ^ f "中文" 😢'
+          & .\bin\shellish.ps1 --from-shell $prompt > out-ps.txt
+          Get-Content out-ps.txt
+          $out = Get-Content out-ps.txt -Raw
+          if ($out -notmatch [regex]::Escape("DRY_RUN fromShell=1 prompt=$prompt")) { Write-Error "prompt was not preserved"; exit 1 }
+
       - name: Test context.js build
         run: |
           $out = node lib\context.js build $PWD "list files"
           if ($out -match "Instructions") { Write-Host "context.js OK" }
           else { Write-Error "context.js unexpected output"; exit 1 }
+          if ($out -notmatch "Host OS: Windows") { Write-Error "Windows host rule missing"; exit 1 }
+          if ($out -match "Get-ChildItem instead") { Write-Error "prompt should not prescribe PowerShell command substitutions"; exit 1 }
+          if ($out -notmatch "shellish-trash") { Write-Error "safe delete command missing"; exit 1 }
 
       - name: Test SHELLISH_HOME override
         run: |
@@ -184,9 +207,150 @@ jobs:
           '@ | Set-Content renderer-regression.js
           node renderer-regression.js
 
+      - name: Test hook marker install/uninstall and cwd
+        shell: pwsh
+        env:
+          USERPROFILE: ${{ runner.temp }}\userprofile
+          SHELLISH_DRY_RUN: "1"
+        run: |
+          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
+          node lib\shellish-cmd.js install-hook
+          $profiles = @(
+            "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
+            "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
+          )
+          foreach ($p in $profiles) {
+            if (-not (Test-Path $p)) { Write-Error "missing profile $p"; exit 1 }
+            $s = Get-Content $p -Raw
+            if ($s -notmatch '>>> shellish hook >>>') { Write-Error "missing marker in $p"; exit 1 }
+          }
+          node lib\shellish-cmd.js uninstall-hook
+          foreach ($p in $profiles) {
+            $s = Get-Content $p -Raw
+            if ($s -match 'shellish hook') { Write-Error "hook not removed from $p"; exit 1 }
+          }
+
+      - name: Test PSReadLine hook classifies input correctly
+        shell: pwsh
+        run: |
+          # Load the profile script (does not require a real PSReadLine session)
+          . "$PWD\shell\profile.ps1"
+          if (-not (Get-Command Test-ShellishShouldHandle -ErrorAction SilentlyContinue)) {
+              Write-Error "Test-ShellishShouldHandle is not defined"; exit 1
+          }
+          $cases = @(
+              @{ Line = 'gti status';          Expected = $true;  Why = 'typo + arg should route to shellish' }
+              @{ Line = 'list all png files';  Expected = $true;  Why = 'multi-word natural language' }
+              @{ Line = 'git status';          Expected = $false; Why = 'known command flows through' }
+              @{ Line = 'ls -la';              Expected = $false; Why = 'known native command' }
+              @{ Line = '$x = 5';              Expected = $false; Why = 'assignment' }
+              @{ Line = 'if ($x -eq 1) { }';   Expected = $false; Why = 'language keyword' }
+              @{ Line = 'foreach ($i in $a) { $i }'; Expected = $false; Why = 'foreach' }
+              @{ Line = 'function f { }';     Expected = $false; Why = 'function definition' }
+              @{ Line = 'return 1';            Expected = $false; Why = 'return' }
+              @{ Line = 'try { } catch { }';   Expected = $false; Why = 'try/catch' }
+              @{ Line = '(Get-Date)';          Expected = $false; Why = 'subexpression' }
+              @{ Line = '> out.txt';           Expected = $false; Why = 'redirect' }
+              @{ Line = '|';                   Expected = $false; Why = 'pipe-only' }
+              @{ Line = '. ./script.ps1';      Expected = $false; Why = 'dot-source' }
+              @{ Line = '& $var';              Expected = $false; Why = 'call operator' }
+              @{ Line = '.\script.ps1';        Expected = $false; Why = 'relative script path' }
+              @{ Line = './script.ps1';        Expected = $false; Why = 'relative script path slash' }
+              @{ Line = 'C:\Windows\notepad.exe'; Expected = $false; Why = 'absolute executable path' }
+              @{ Line = '"C:\Program Files\foo.exe" --help'; Expected = $false; Why = 'quoted executable path' }
+              @{ Line = 'Get-Help foo';        Expected = $false; Why = 'known cmdlet' }
+              @{ Line = 'Remove-Item x';       Expected = $false; Why = 'known cmdlet' }
+              @{ Line = '帮我压缩图片';         Expected = $true;  Why = 'CJK natural language' }
+              @{ Line = 'help me';             Expected = $true;  Why = 'multi-word NL' }
+              @{ Line = '';                    Expected = $false; Why = 'empty' }
+              @{ Line = '   ';                 Expected = $false; Why = 'whitespace' }
+          )
+          $fail = 0
+          foreach ($c in $cases) {
+              $got = Test-ShellishShouldHandle $c.Line
+              if ($got -ne $c.Expected) {
+                  Write-Error "FAIL [$($c.Why)] '$($c.Line)' expected=$($c.Expected) got=$got"
+                  $fail++
+              }
+          }
+          if ($fail -gt 0) { exit 1 }
+          Write-Host "Test-ShellishShouldHandle: $($cases.Count) cases passed"
+
+      - name: Test PSReadLine Enter handler is installed
+        shell: pwsh
+        run: |
+          # Load profile into a fresh session and confirm the key handler bound.
+          . "$PWD\shell\profile.ps1"
+          $bound = Get-PSReadLineKeyHandler -Bound -ErrorAction SilentlyContinue |
+              Where-Object { $_.Description -eq 'shellish::enter' }
+          if (-not $bound) { Write-Error "shellish::enter key handler not bound"; exit 1 }
+          Write-Host "PSReadLine handler bound OK: $($bound[0].Key)"
+
+      - name: Test profile.ps1 parse-clean in PS 5.1
+        shell: powershell
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              "$PWD\shell\profile.ps1", [ref]$null, [ref]$errors
+          )
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+          Write-Host "profile.ps1 PS 5.1 parse OK"
+
+      - name: Test Remove-Item wrapper is installed by profile.ps1
+        shell: powershell
+        run: |
+          # Source the profile. The wrapper overrides Remove-Item so the
+          # function (not the cmdlet) is what `Get-Command` finds.
+          . "$PWD\shell\profile.ps1"
+          $ri = Get-Command Remove-Item -ErrorAction SilentlyContinue
+          if (-not $ri) { Write-Error "Remove-Item missing"; exit 1 }
+          if ($ri.CommandType -ne 'Function') {
+              Write-Error "Remove-Item wrapper not installed: CommandType is $($ri.CommandType), expected Function"
+              exit 1
+          }
+          Write-Host "Remove-Item wrapper installed: CommandType=Function"
+
+          # Verify aliases are rebound to the wrapper.
+          foreach ($a in 'rm','del','erase','rmdir','rd') {
+              $alias = Get-Alias $a -ErrorAction SilentlyContinue
+              if (-not $alias) { Write-Error "alias $a missing"; exit 1 }
+              if ($alias.Definition -ne 'Remove-Item') {
+                  Write-Error "alias $a points to '$($alias.Definition)', expected 'Remove-Item'"
+                  exit 1
+              }
+              Write-Host "alias $a -> Remove-Item OK"
+          }
       - name: Test safe-rm.js (no-op, allow mode)
         run: |
           $env:SHELLISH_CONFIRM_DANGER = "allow"
           $env:SHELLISH_SESSION_DIR = $env:TEMP
           node lib\safe-rm.js
           Write-Host "safe-rm.js OK"
+
+      - name: Test agent resolution on real Windows
+        shell: pwsh
+        run: |
+          # Probe resolveAgentCommand for all 4 agents and confirm the
+          # output is well-formed: { cmd, args, displayCmd, shell }.
+          $res = node -e "
+            const r = require('./lib/agent-resolver');
+            for (const a of ['pi','omp','claude','codex','definitely-not-installed-xyz']) {
+              const x = r.resolveAgentCommand(a, { PATH: process.env.PATH || '' });
+              if (typeof x.cmd !== 'string' || typeof x.displayCmd !== 'string'
+                  || typeof x.shell !== 'boolean' || !Array.isArray(x.args)) {
+                console.error('bad shape for ' + a + ':', JSON.stringify(x));
+                process.exit(1);
+              }
+              console.log(a + '=' + JSON.stringify(x));
+            }
+          "
+          $res | ForEach-Object { Write-Host "  $_" }
+
+      - name: Test node fall-through on real Windows
+        shell: pwsh
+        run: |
+          # The agent resolver must be invokable directly so the PSReadLine
+          # hook can rely on it if we ever extend that path.
+          $out = node -e "console.log(typeof require('./lib/agent-resolver').resolveAgentCommand)"
+          if ($out -ne 'function') { Write-Error "resolveAgentCommand missing"; exit 1 }
+          Write-Host "agent-resolver exports OK"
