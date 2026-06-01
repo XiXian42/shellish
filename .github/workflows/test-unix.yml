@@ -57,6 +57,9 @@ jobs:
 
       - name: Test bash entrypoint
         run: |
-          chmod +x bin/shellish
+          bash -n install.sh
+          chmod +x bin/shellish bin/shellish-trash bin/shellish-rm
           SHELLISH_DRY_RUN=1 ./bin/shellish "list files" 2>&1 | grep -q "DRY_RUN" || (echo "shellish bash failed" && exit 1)
+          bash -n bin/shellish-trash
+          bash -n bin/shellish-rm
           echo "bash entrypoint OK"

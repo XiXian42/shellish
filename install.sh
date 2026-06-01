@@ -39,7 +39,10 @@ need() {
   fi
 }
 need bash
-need git || need curl   # need at least one download method
+if ! command -v git &>/dev/null && ! command -v curl &>/dev/null; then
+  echo "  $(red "✗") Required tool not found: git or curl"
+  exit 1
+fi
 
 # ── detect shell ──────────────────────────────────────────────────────────────
 CURRENT_SHELL="$(basename "${SHELL:-bash}")"
@@ -67,10 +70,11 @@ else
   else
     # Fallback: download individual files via curl
     for f in \
-      bin/shellish \
+      bin/shellish bin/shellish-trash bin/shellish-rm \
       lib/agent.sh lib/config.sh lib/confirm.sh lib/context.js \
       lib/detect.sh lib/render.js lib/run.js lib/spinner.sh \
-      lib/safe-rm.sh lib/confirm-prompt.sh \
+      lib/safe-rm.sh lib/safe-rm.js lib/confirm-prompt.sh \
+      lib/ansi.js lib/config-win.js lib/history-key.js lib/agent-resolver.js \
       shell/zshrc.zsh shell/bashrc.bash; do
       mkdir -p "${INSTALL_DIR}/$(dirname "$f")"
       curl -fsSL "${SHELLISH_RAW}/${f}" -o "${INSTALL_DIR}/${f}"
@@ -80,6 +84,8 @@ fi
 
 # ── make binary executable and symlink ────────────────────────────────────────
 chmod +x "${INSTALL_DIR}/bin/shellish"
+[[ -f "${INSTALL_DIR}/bin/shellish-trash" ]] && chmod +x "${INSTALL_DIR}/bin/shellish-trash"
+[[ -f "${INSTALL_DIR}/bin/shellish-rm" ]] && chmod +x "${INSTALL_DIR}/bin/shellish-rm"
 chmod +x "${INSTALL_DIR}/lib/safe-rm.sh"
 chmod +x "${INSTALL_DIR}/lib/confirm-prompt.sh"
 
