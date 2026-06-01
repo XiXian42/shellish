@@ -132,7 +132,7 @@ foreach ($p in $staleCandidates) {
                 Microsoft.PowerShell.Management\Remove-Item $p -Force
                 Write-Ok "Removed stale shellish shim: $p"
             } catch {
-                Write-Warn "Could not remove stale shim $p: $($_.Exception.Message)"
+                Write-Warn "Could not remove stale shim ${p}: $($_.Exception.Message)"
             }
         } elseif ($content) {
             Write-Dim "Skipping non-shellish file at $p"
@@ -169,18 +169,59 @@ for ($i = 0; $i -lt $agents.Count; $i++) {
     Write-Host ("    {0}) {1,-10}  {2}" -f ($i+1), $a, $descs[$a]) -ForegroundColor DarkGray
 }
 Write-Host ""
-$choiceRaw = ''
-try {
-    if (-not [Console]::IsInputRedirected) {
-        $choiceRaw = Read-Host "  Your choice [1-$($agents.Count), default=1]"
+
+# Non-interactive: stdin is redirected (e.g. `irm ... | iex`). Honour
+# $env:SHELLISH_AGENT if it names one of the detected agents, else fall
+# back to the first detected agent in the order [pi, omp, claude, codex].
+# Probe the first agent in a non-zero-exit probe to make sure it actually
+# launches; if the first fails, walk the list and pick the first that
+# returns 0. (We do a 5-second timeout so a hung agent does not stall
+# the install forever.)
+function Test-AgentHealthy([string]$a) {
+    try {
+        $p = Start-Process -FilePath $a -ArgumentList '--version' `
+            -PassThru -NoNewWindow -RedirectStandardOutput "$env:TEMP\shellish-probe-$a.txt" `
+            -RedirectStandardError "$env:TEMP\shellish-probe-$a.err"
+        $exited = $p.WaitForExit(5000)
+        if (-not $exited) { try { $p.Kill() } catch { }; return $false }
+        return ($p.ExitCode -eq 0)
+    } catch { return $false }
+}
+
+$chosen = $null
+$nonInteractive = [Console]::IsInputRedirected
+if ($nonInteractive) {
+    Write-Dim "Non-interactive install (stdin is redirected). Use \$env:SHELLISH_AGENT to override."
+    if ($env:SHELLISH_AGENT -and ($agents -contains $env:SHELLISH_AGENT)) {
+        $chosen = $env:SHELLISH_AGENT
+        Write-Dim "Using SHELLISH_AGENT=$chosen"
+    } else {
+        # Probe the first agent; if it crashes or is not actually a
+        # shellish-compatible agent, fall through to the rest.
+        foreach ($a in $agents) {
+            Write-Dim "Probing $a ..."
+            if (Test-AgentHealthy $a) {
+                $chosen = $a
+                Write-Dim "Healthy: $a"
+                break
+            } else {
+                Write-Dim "Skipping $a (probe failed)"
+            }
+        }
+        if (-not $chosen) { $chosen = $agents[0] }
     }
-} catch { $choiceRaw = '' }
-$choice = "$choiceRaw".Trim()
-$digits = ($choice -replace '[^\d]', '')
-if ([string]::IsNullOrWhiteSpace($digits)) { $idx = 0 }
-else { $idx = [int]$digits - 1 }
-if ($idx -lt 0 -or $idx -ge $agents.Count) { $idx = 0 }
-$chosen = $agents[$idx]
+} else {
+    $choiceRaw = ''
+    try {
+        $choiceRaw = Read-Host "  Your choice [1-$($agents.Count), default=1]"
+    } catch { $choiceRaw = '' }
+    $choice = "$choiceRaw".Trim()
+    $digits = ($choice -replace '[^\d]', '')
+    if ([string]::IsNullOrWhiteSpace($digits)) { $idx = 0 }
+    else { $idx = [int]$digits - 1 }
+    if ($idx -lt 0 -or $idx -ge $agents.Count) { $idx = 0 }
+    $chosen = $agents[$idx]
+}
 
 # ── save config ───────────────────────────────────────────────────────────────
 $cfgDir = "$env:APPDATA\shellish"
@@ -208,27 +249,68 @@ $profileFiles = @(
     "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
 ) | Select-Object -Unique
 $hookLine = "`n$HOOK_BEGIN`n. `"$INSTALL_DIR\shell\profile.ps1`"`n$HOOK_END`n"
+$hookInstalled = $false
+$hookSkipped   = @()
 foreach ($profileFile in $profileFiles) {
     $profileDir = Split-Path -Parent $profileFile
-    if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Force -Path $profileDir | Out-Null }
-    $existing = if (Test-Path $profileFile) { Get-Content $profileFile -Raw } else { '' }
-    $cleaned = Remove-ShellishHookBlock $existing
-    Write-Utf8NoBom $profileFile ($cleaned + $hookLine)
-    Write-Ok "Hook installed in $profileFile"
+    try {
+        if (-not (Test-Path $profileDir)) {
+            New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+        }
+        $existing = if (Test-Path $profileFile) { Get-Content $profileFile -Raw } else { '' }
+        $cleaned  = Remove-ShellishHookBlock $existing
+        Write-Utf8NoBom $profileFile ($cleaned + $hookLine)
+        Write-Ok "Hook installed in $profileFile"
+        $hookInstalled = $true
+    } catch {
+        Write-Warn "Could not write profile ${profileFile}: $($_.Exception.Message)"
+        $hookSkipped += $profileFile
+    }
+}
+if (-not $hookInstalled) {
+    Write-Host ""
+    Write-Warn "PowerShell profile could not be auto-installed (permission denied or path missing)."
+    Write-Dim "Profile paths tried:"
+    foreach ($p in $hookSkipped) { Write-Dim "  - $p" }
+    Write-Dim "Fix one of these, then run:"
+    Write-Dim "  shellish install-hook"
+    Write-Dim "Or manually add this line to your PowerShell profile:"
+    Write-Dim "  . `"$INSTALL_DIR\shell\profile.ps1`""
+    Write-Host ""
 }
 
 # ── execution policy guidance ─────────────────────────────────────────────────
+# If the policy is Restricted / AllSigned, our install hook will silently
+# no-op and `shellish` will look broken. Probe the policy and, if it
+# blocks, print a REQUIRED-STEP banner so the user does not miss it.
+$policyBlocks = $false
+$effectivePolicy = $null
+$currentUserPolicy = $null
 try {
-    $effectivePolicy = Get-ExecutionPolicy
+    $effectivePolicy   = Get-ExecutionPolicy
     $currentUserPolicy = Get-ExecutionPolicy -Scope CurrentUser
     if ($effectivePolicy -in @('Restricted', 'AllSigned') -or $currentUserPolicy -in @('Restricted', 'AllSigned')) {
-        Write-Host ""
-        Write-Warn "PowerShell execution policy may block the shellish hook."
-        Write-Dim "Effective policy: $effectivePolicy; CurrentUser: $currentUserPolicy"
-        Write-Dim "Recommended: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
-        Write-Dim "Temporary test: powershell -ExecutionPolicy Bypass"
+        $policyBlocks = $true
     }
 } catch { }
+if ($policyBlocks) {
+    Write-Host ""
+    Write-Host "  ─────────────────────────────────────────────" -ForegroundColor Yellow
+    Write-Host "  ! REQUIRED STEP — PowerShell execution policy" -ForegroundColor Yellow
+    Write-Host "  ─────────────────────────────────────────────" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Current policy: $effectivePolicy (user: $currentUserPolicy)" -ForegroundColor Yellow
+    Write-Host "  shellish scripts are unsigned; Windows PowerShell will refuse"
+    Write-Host "  to load them with the above policy. Run ONE of these in a"
+    Write-Host "  PowerShell window (the first is recommended):"
+    Write-Host ""
+    Write-Host "    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  or, for a one-time test without changing policy:"
+    Write-Host ""
+    Write-Host "    powershell -ExecutionPolicy Bypass" -ForegroundColor White
+    Write-Host ""
+}
 
 # ── done ──────────────────────────────────────────────────────────────────────
 Write-Host ""

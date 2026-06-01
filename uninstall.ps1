@@ -120,7 +120,7 @@ foreach ($p in $staleCandidates) {
                 Microsoft.PowerShell.Management\Remove-Item $p -Force
                 Write-Ok "Removed stale shellish shim: $p"
             } catch {
-                Write-Warn "Could not remove stale shim $p: $($_.Exception.Message)"
+                Write-Warn "Could not remove stale shim ${p}: $($_.Exception.Message)"
             }
         } elseif ($content) {
             Write-Dim "Skipping non-shellish file at $p"

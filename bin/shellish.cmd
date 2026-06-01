@@ -1,6 +1,9 @@
 @echo off
 :: shellish — Windows entry point
-:: Delegates everything to run.js via Node.js
+:: Delegates everything to shellish-cmd.js via Node.js. We keep the
+:: version string local so `shellish.cmd --version` works even when
+:: Node is not yet on PATH; everything else is a single Node call so
+:: we do not depend on cmd.exe argument parsing edge cases.
 
 :: Resolve paths relative to this .cmd file
 set "SHELLISH_ROOT=%~dp0.."
@@ -18,45 +21,16 @@ if not exist "%NODE_EXE%" (
     set "NODE_EXE=node"
 )
 
-:: Sub-commands that don't need run.js
-if "%~1"=="version"        goto :version
-if "%~1"=="--version"      goto :version
-if "%~1"=="-v"             goto :version
-if "%~1"=="status"         goto :status
-if "%~1"=="install-hook"   goto :install_hook
-if "%~1"=="uninstall-hook" goto :uninstall_hook
-if "%~1"=="config"         goto :config
-if "%~1"=="help"           goto :help
-if "%~1"=="-h"             goto :help
-if "%~1"=="--help"         goto :help
+:: Inline version: avoid spinning up Node just to print a constant.
+if /i "%~1"=="version" goto :version
+if /i "%~1"=="--version" goto :version
+if /i "%~1"=="-v" goto :version
 
-:: Default: delegate all argument parsing to shellish-cmd.js.
-:: Important: do not parse/shift --from-shell here. In batch files %* always
-:: contains the original arguments, so shifting would leak --from-shell into
-:: the user prompt.
+:: Everything else (status, config, help, install-hook, --from-shell,
+:: or a raw natural-language prompt) is handled by shellish-cmd.js.
 "%NODE_EXE%" "%SHELLISH_LIB%\shellish-cmd.js" %*
 goto :eof
 
 :version
 echo shellish v0.1.0
-goto :eof
-
-:status
-"%NODE_EXE%" "%SHELLISH_LIB%\shellish-cmd.js" status
-goto :eof
-
-:install_hook
-"%NODE_EXE%" "%SHELLISH_LIB%\shellish-cmd.js" install-hook
-goto :eof
-
-:uninstall_hook
-"%NODE_EXE%" "%SHELLISH_LIB%\shellish-cmd.js" uninstall-hook
-goto :eof
-
-:config
-"%NODE_EXE%" "%SHELLISH_LIB%\shellish-cmd.js" config
-goto :eof
-
-:help
-"%NODE_EXE%" "%SHELLISH_LIB%\shellish-cmd.js" help
 goto :eof
