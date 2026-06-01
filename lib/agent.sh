@@ -104,6 +104,22 @@ shellish_run_agent() {
     return 1
   fi
 
+  # DRY_RUN short-circuit: do not require the agent binary to exist on
+  # PATH, do not call the agent, do not check shellish_run_agent below.
+  # CI smoke tests rely on this; a clean runner may not have pi/omp/
+  # claude/codex installed yet we still want the entrypoint to print a
+  # 'DRY_RUN' marker line for the surrounding 'grep -q DRY_RUN' check.
+  if [[ "${SHELLISH_DRY_RUN:-}" == "1" ]]; then
+    local run_js
+    run_js="$(dirname "${BASH_SOURCE[0]}")/run.js"
+    if [[ "${SHELLISH_FROM_SHELL:-}" == "1" ]]; then
+      node "$run_js" --from-shell "$agent" "$PWD" "$prompt"
+    else
+      node "$run_js" "$agent" "$PWD" "$prompt"
+    fi
+    return $?
+  fi
+
   if ! command -v "$agent" &>/dev/null; then
     echo "  ✗ Configured agent '$agent' not found in PATH."
     echo "    Run: shellish config   to pick a different one."
