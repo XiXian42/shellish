@@ -170,13 +170,21 @@ for ($i = 0; $i -lt $agents.Count; $i++) {
 }
 Write-Host ""
 
-# Non-interactive: stdin is redirected (e.g. `irm ... | iex`). Honour
-# $env:SHELLISH_AGENT if it names one of the detected agents, else fall
-# back to the first detected agent in the order [pi, omp, claude, codex].
-# Probe the first agent in a non-zero-exit probe to make sure it actually
-# launches; if the first fails, walk the list and pick the first that
-# returns 0. (We do a 5-second timeout so a hung agent does not stall
-# the install forever.)
+# Non-interactive: stdin is redirected (e.g. `irm ... | iex`). Decide
+# based on the *actual* agents installed on the user's machine, not
+# on a hard-coded preference order. The plan:
+#   1. Probe every detected agent with `--version` (5s timeout each)
+#      to figure out which ones actually launch.
+#   2. If exactly one is healthy, pick it. That is the user's real
+#      setup; we should respect it instead of preferring pi.
+#   3. If multiple are healthy and the install is interactive, ask
+#      the user to choose. If non-interactive, pick the first healthy
+#      one (in the order they were detected, which roughly matches
+#      PATH order) and warn the user that the choice may not be
+#      what they want.
+#   4. If none are healthy (all probes timed out / errored), fall
+#      back to the first detected agent so the install still
+#      completes; the user will see the obvious failure on first run.
 function Test-AgentHealthy([string]$a) {
     try {
         $p = Start-Process -FilePath $a -ArgumentList '--version' `
@@ -188,29 +196,45 @@ function Test-AgentHealthy([string]$a) {
     } catch { return $false }
 }
 
+$healthy = @()
+foreach ($a in $agents) {
+    Write-Dim "Probing $a ..."
+    if (Test-AgentHealthy $a) {
+        $healthy += $a
+        Write-Dim "  $a responds"
+    } else {
+        Write-Dim "  $a probe failed (timed out or errored)"
+    }
+}
+
 $chosen = $null
 $nonInteractive = [Console]::IsInputRedirected
 if ($nonInteractive) {
-    Write-Dim "Non-interactive install (stdin is redirected). Use \$env:SHELLISH_AGENT to override."
-    if ($env:SHELLISH_AGENT -and ($agents -contains $env:SHELLISH_AGENT)) {
-        $chosen = $env:SHELLISH_AGENT
-        Write-Dim "Using SHELLISH_AGENT=$chosen"
+    Write-Dim "Non-interactive install (stdin is redirected). Picking from healthy agents on this machine."
+    if ($healthy.Count -eq 1) {
+        # Only one usable agent: that is the user's real setup.
+        $chosen = $healthy[0]
+        Write-Dim "Only $chosen responded; using it."
+    } elseif ($healthy.Count -gt 1) {
+        $chosen = $healthy[0]
+        Write-Warn "Multiple agents respond on this machine: $($healthy -join ', ')."
+        Write-Warn "Non-interactive install picked $chosen. To choose another, run 'shellish config' after install."
     } else {
-        # Probe the first agent; if it crashes or is not actually a
-        # shellish-compatible agent, fall through to the rest.
-        foreach ($a in $agents) {
-            Write-Dim "Probing $a ..."
-            if (Test-AgentHealthy $a) {
-                $chosen = $a
-                Write-Dim "Healthy: $a"
-                break
-            } else {
-                Write-Dim "Skipping $a (probe failed)"
-            }
-        }
-        if (-not $chosen) { $chosen = $agents[0] }
+        # No agent responded. Pick the first detected agent so the
+        # install completes; user will hit the obvious failure on
+        # first run and the README / status will guide them.
+        $chosen = $agents[0]
+        Write-Warn "No agent responded to '--version' on this machine."
+        Write-Warn "Defaulting to $chosen. You will need to authenticate it before shellish can use it."
     }
 } else {
+    # Interactive: list agents (mark healthy ones), let user pick.
+    if ($healthy.Count -gt 0 -and $healthy.Count -lt $agents.Count) {
+        Write-Host "  Agents that respond to --version: " -NoNewline
+        Write-Host ($healthy -join ', ') -ForegroundColor Green
+        Write-Host "  Other detected agents did not respond and may need authentication."
+        Write-Host ""
+    }
     $choiceRaw = ''
     try {
         $choiceRaw = Read-Host "  Your choice [1-$($agents.Count), default=1]"
