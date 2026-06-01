@@ -11,7 +11,37 @@
 #      PSReadLine (rare). PS 5.1 only exposes $Name here — the rest of the
 #      buffer is lost. We do what we can.
 
-$_shellishRoot = Split-Path -Parent $PSScriptRoot
+# Resolve the install root without relying on $PSScriptRoot: the latter
+# is only meaningful when this file is run as a script; when the file
+# is dot-sourced from the command line (CI step, . $PROFILE) it inherits
+# the caller's $PSScriptRoot, which may be $null. $MyInvocation gives us
+# the path of *this* script regardless of how we got here, but in early
+# PS 5.1 builds it can also be empty when dot-sourced from an
+# interactive session, so fall back to PWD-derived heuristics.
+$_shellishScriptPath = $null
+if ($MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
+    $_shellishScriptPath = $MyInvocation.MyCommand.Path
+}
+if (-not $_shellishScriptPath -and $PSCommandPath) {
+    $_shellishScriptPath = $PSCommandPath
+}
+if ($_shellishScriptPath) {
+    $_shellishRoot = Split-Path -Parent (Split-Path -Parent $_shellishScriptPath)
+} else {
+    # Last-resort: walk up from CWD looking for a sibling bin/ folder
+    # that contains shellish.ps1. Catches CI run-from-anywhere cases.
+    $probe = Get-Location
+    $_shellishRoot = $null
+    for ($i = 0; $i -lt 8; $i++) {
+        if (Test-Path (Join-Path $probe 'bin\shellish.ps1') -PathType Leaf) {
+            $_shellishRoot = $probe
+            break
+        }
+        $probe = Split-Path -Parent $probe
+        if (-not $probe -or $probe -eq (Split-Path -Parent $probe)) { break }
+    }
+    if (-not $_shellishRoot) { $_shellishRoot = Get-Location }
+}
 $global:_shellishBin = Join-Path $_shellishRoot 'bin\shellish.ps1'
 if (-not (Test-Path $global:_shellishBin)) {
     $global:_shellishBin = Join-Path $_shellishRoot 'bin\shellish.cmd'
