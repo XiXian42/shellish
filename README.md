@@ -46,6 +46,8 @@ curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh |
 irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
 ```
 
+Use PowerShell 7 or Windows PowerShell 5.1 as the main Windows entry point. `shellish.cmd` exists as a compatibility shim, but PowerShell (`shellish.ps1`) preserves complex arguments, Unicode, and shell hooks more reliably than CMD.
+
 If PowerShell blocks the hook with "running scripts is disabled", enable user scripts once:
 
 ```powershell
@@ -82,21 +84,26 @@ shellish uses whatever is already on your system — it won't install agents for
 
 ### Usage
 
-After installing the hook, just type at the prompt:
+After installing the hook, just type natural language at the prompt:
 
 ```bash
-find all TODO comments in this repo and summarize them
+compress all png files in this directory
+
+fix the last git conflict
 
 deploy the app with production config
 
 why is my build failing?
 ```
 
-Or call explicitly:
+If a request happens to start with a word that is also a real shell command, your shell may run that command instead of handing the line to shellish. In those rare command-name conflicts, wrap the sentence in quotes so the shell treats it as one unknown command and shellish can handle it:
 
 ```bash
-shellish "clean up log files older than 7 days"
+"find all TODO comments in this repo and summarize them"
+"sort these files by size and summarize the largest ones"
 ```
+
+You can still call `shellish "..."` explicitly if you prefer.
 
 ### Memory
 
@@ -210,6 +217,8 @@ curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh |
 irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
 ```
 
+Windows 建议使用 PowerShell 7 或 Windows PowerShell 5.1 作为主入口。`shellish.cmd` 只是兼容 shim；PowerShell 入口（`shellish.ps1`）对复杂参数、Unicode 和 hook 更可靠。
+
 如果 PowerShell 提示 `running scripts is disabled`，需要为当前用户开启脚本执行：
 
 ```powershell
@@ -249,16 +258,21 @@ $env:SHELLISH_HOME = "$env:APPDATA\shellish"
 ```bash
 帮我找出当前目录最大的 10 个文件
 
-find all TODO comments in this repo and summarize them
+fix the last git conflict
 
 deploy the app, 用 production 配置
+
+why is my build failing?
 ```
 
-也可以显式调用：
+如果某个请求刚好以真实 shell 命令名开头，shell 可能会直接执行该命令，而不是交给 shellish。遇到这类少数命令名冲突时，推荐把整句话用引号包起来，让 shell 把它当成一个未知命令交给 shellish：
 
 ```bash
-shellish "把 logs 目录下 7 天前的文件都清理掉"
+"find all TODO comments in this repo and summarize them"
+"sort these files by size and summarize the largest ones"
 ```
+
+如果你更喜欢，也仍然可以显式调用 `shellish "..."`。
 
 ### Memory
 
