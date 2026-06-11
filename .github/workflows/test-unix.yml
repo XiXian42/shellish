@@ -67,3 +67,44 @@ jobs:
           bash -n bin/shellish-trash
           bash -n bin/shellish-rm
           echo "bash entrypoint OK"
+
+      - name: Test safe-rm flag stripping and -f semantics
+        run: |
+          bash -n lib/safe-rm.sh
+          TMP=$(mktemp -d)
+          mkdir -p "$TMP/fake-bin"
+          # fake trash backend records argv; rejects rm-style flags like the real ones
+          cat > "$TMP/fake-bin/trash" <<'EOF'
+          #!/usr/bin/env bash
+          for a in "$@"; do
+            case "$a" in -*) echo "unexpected flag: $a" >&2; exit 2;; esac
+          done
+          printf '%s\n' "$@" >> "${TRASH_LOG:?}"
+          for t in "$@"; do /bin/rm -rf -- "$t"; done
+          EOF
+          chmod +x "$TMP/fake-bin/trash"
+          export TRASH_LOG="$TMP/args.log"
+
+          mkdir -p "$TMP/a/.venv" "$TMP/b/.venv"
+          touch "$TMP/a/.venv/x" "$TMP/b/.venv/y"
+          ( cd "$TMP" && PATH="$TMP/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow \
+              bash "$GITHUB_WORKSPACE/lib/safe-rm.sh" -rf a/.venv b/.venv )
+          test ! -e "$TMP/a/.venv" || (echo "a/.venv survived" && exit 1)
+          test ! -e "$TMP/b/.venv" || (echo "b/.venv survived" && exit 1)
+
+          # -f missing → 0; without -f → 1
+          PATH="$TMP/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow \
+            bash lib/safe-rm.sh -f "$TMP/nope" || (echo "-f missing should exit 0" && exit 1)
+          if PATH="$TMP/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow \
+            bash lib/safe-rm.sh "$TMP/nope" 2>/dev/null; then
+            echo "missing without -f should exit 1"; exit 1
+          fi
+
+          # parseRmArgs unit (shared logic for safe-rm.js)
+          node -e "
+            const { parseRmArgs } = require('./lib/safe-rm.js');
+            const eq = (g, w) => JSON.stringify(g) === JSON.stringify(w);
+            if (!eq(parseRmArgs(['-rf','a','b']), {targets:['a','b'],force:true})) process.exit(1);
+            if (!eq(parseRmArgs(['--','-rf']), {targets:['-rf'],force:false})) process.exit(1);
+          "
+          echo "safe-rm OK"

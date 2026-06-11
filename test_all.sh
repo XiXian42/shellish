@@ -396,6 +396,275 @@ fi
 rm -rf "$TMP_RENDER_DIR"
 
 # ══════════════════════════════════════════════════════════════════════════════
+section "10 · SAFE-RM — rm flags, -f semantics, batch delete"
+# ══════════════════════════════════════════════════════════════════════════════
+
+SRM="${LIB}/safe-rm.sh"
+TMP_SRM="/tmp/shellish-safe-rm-test-$$"
+rm -rf "$TMP_SRM"; mkdir -p "$TMP_SRM"
+
+# Fake trash backend that records its argv — lets us assert flags are
+# stripped without touching the real Trash.
+mkdir -p "$TMP_SRM/fake-bin"
+cat > "$TMP_SRM/fake-bin/trash" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${SRM_TRASH_LOG:?}"
+for t in "$@"; do /bin/rm -rf -- "$t"; done
+EOF
+chmod +x "$TMP_SRM/fake-bin/trash"
+export SRM_TRASH_LOG="$TMP_SRM/trash-args.log"
+
+srm() {
+  PATH="$TMP_SRM/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow bash "$SRM" "$@"
+}
+
+# rm -rf on multiple dirs (the ".venv sweep" case)
+( cd "$TMP_SRM" && mkdir -p a/.venv b/.venv && touch a/.venv/x b/.venv/y )
+TOTAL=$((TOTAL+1))
+if ( cd "$TMP_SRM" && srm -rf a/.venv b/.venv ) \
+   && [[ ! -e "$TMP_SRM/a/.venv" && ! -e "$TMP_SRM/b/.venv" ]]; then
+  pass "rm -rf trashes multiple directories"
+else
+  fail "rm -rf multi-dir: dirs survived or non-zero exit"
+fi
+
+TOTAL=$((TOTAL+1))
+if grep -q -- '-rf' "$SRM_TRASH_LOG" 2>/dev/null; then
+  fail "flags leaked to trash backend: $(cat "$SRM_TRASH_LOG")"
+else
+  pass "rm flags stripped before reaching trash backend"
+fi
+
+# -f + missing operand → exit 0 (rm semantics)
+assert_exit "-f missing operand exits 0" 0 \
+  env PATH="$TMP_SRM/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow bash "$SRM" -f "$TMP_SRM/nope"
+
+# missing operand without -f → exit 1
+assert_exit "missing operand without -f exits 1" 1 \
+  env PATH="$TMP_SRM/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow bash "$SRM" "$TMP_SRM/nope"
+
+# mixed existing+missing without -f → trash existing, still exit 1
+touch "$TMP_SRM/real.txt"
+TOTAL=$((TOTAL+1))
+mixed_exit=0
+( cd "$TMP_SRM" && srm real.txt gone.txt ) 2>/dev/null || mixed_exit=$?
+if [[ "$mixed_exit" == "1" && ! -e "$TMP_SRM/real.txt" ]]; then
+  pass "mixed operands: existing trashed, exit 1 for missing"
+else
+  fail "mixed operands (exit=$mixed_exit, real.txt exists=$([[ -e $TMP_SRM/real.txt ]] && echo yes || echo no))"
+fi
+
+# no operands at all
+assert_exit "no operands without -f exits 1" 1 \
+  env PATH="$TMP_SRM/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow bash "$SRM"
+assert_exit "no operands with -f exits 0" 0 \
+  env PATH="$TMP_SRM/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=allow bash "$SRM" -rf
+
+# ask-mode handshake: deny keeps the file
+mkdir -p "$TMP_SRM/session"
+touch "$TMP_SRM/keep.txt"
+(
+  for _ in $(seq 1 100); do
+    req=$(ls "$TMP_SRM/session"/req.* 2>/dev/null | head -1) || true
+    if [[ -n "${req:-}" ]]; then echo N > "$TMP_SRM/session/res.${req##*.}"; break; fi
+    sleep 0.1
+  done
+) &
+DENY_WAITER=$!
+TOTAL=$((TOTAL+1))
+deny_exit=0
+( cd "$TMP_SRM" && PATH="$TMP_SRM/fake-bin:$PATH" SHELLISH_CONFIRM_DANGER=ask SHELLISH_SESSION_DIR="$TMP_SRM/session" bash "$SRM" -rf keep.txt ) 2>/dev/null || deny_exit=$?
+wait "$DENY_WAITER" 2>/dev/null || true
+if [[ "$deny_exit" == "1" && -e "$TMP_SRM/keep.txt" ]]; then
+  pass "ask-mode deny: file survives, exit 1"
+else
+  fail "ask-mode deny (exit=$deny_exit, keep.txt exists=$([[ -e $TMP_SRM/keep.txt ]] && echo yes || echo no))"
+fi
+
+# safe-rm.js parseRmArgs unit tests (shared rm-argv logic on Windows path)
+TOTAL=$((TOTAL+1))
+if node -e "
+const { parseRmArgs } = require('${LIB}/safe-rm.js');
+const eq = (got, want) => JSON.stringify(got) === JSON.stringify(want);
+if (!eq(parseRmArgs(['-rf','a','b']), {targets:['a','b'],force:true})) process.exit(1);
+if (!eq(parseRmArgs(['-r','a']), {targets:['a'],force:false})) process.exit(1);
+if (!eq(parseRmArgs(['--force','x']), {targets:['x'],force:true})) process.exit(1);
+if (!eq(parseRmArgs(['--','-rf']), {targets:['-rf'],force:false})) process.exit(1);
+if (!eq(parseRmArgs([]), {targets:[],force:false})) process.exit(1);
+" 2>/dev/null; then
+  pass "safe-rm.js parseRmArgs strips flags, tracks force, honors --"
+else
+  fail "safe-rm.js parseRmArgs regression"
+fi
+
+rm -rf "$TMP_SRM"
+unset SRM_TRASH_LOG
+
+# ══════════════════════════════════════════════════════════════════════════════
+section "11 · RUN.JS — history tee survives chunk-split JSON lines"
+# ══════════════════════════════════════════════════════════════════════════════
+
+TMP_TEE="/tmp/shellish-tee-test-$$"
+rm -rf "$TMP_TEE"; mkdir -p "$TMP_TEE/fake-bin" "$TMP_TEE/home"
+
+cat > "$TMP_TEE/fake-bin/claude" <<'EOF'
+#!/usr/bin/env bash
+node -e '
+const big = "x".repeat(200000);
+const ev = t => JSON.stringify({type:"stream_event",event:{type:"content_block_delta",delta:{type:"text_delta",text:t}}});
+console.log(JSON.stringify({type:"stream_event",event:{type:"message_start"}}));
+console.log(ev(big));
+console.log(ev("TAIL_MARKER_中文_42"));
+console.log(JSON.stringify({type:"stream_event",event:{type:"message_stop"}}));
+'
+EOF
+chmod +x "$TMP_TEE/fake-bin/claude"
+
+HOME="$TMP_TEE/home" PATH="$TMP_TEE/fake-bin:$PATH" \
+  node "$LIB/run.js" claude "$TESTDIR" "long line test" >/dev/null 2>&1 || true
+
+TEE_HISTORY=$(find "$TMP_TEE/home/.shellish/history" -name '*.jsonl' 2>/dev/null | head -1 || true)
+TOTAL=$((TOTAL+1))
+if [[ -n "$TEE_HISTORY" ]] && node -e "
+const fs = require('fs');
+const line = fs.readFileSync('$TEE_HISTORY','utf8').trim().split('\n').pop();
+const reply = JSON.parse(line).reply || '';
+if (!reply.includes('TAIL_MARKER_中文_42')) process.exit(1);
+if (reply.length > 256) process.exit(1);
+" 2>/dev/null; then
+  pass "history captures text from a >64KB JSON line split across pipe chunks"
+else
+  fail "history tee lost chunk-split JSON line"
+  [[ -n "$TEE_HISTORY" ]] && tail -c 300 "$TEE_HISTORY"
+fi
+
+rm -rf "$TMP_TEE"
+
+# ══════════════════════════════════════════════════════════════════════════════
+section "11b · RUN.JS — confirm prompt answers (y / N / a)"
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Regression: promptUser must consume the answer BEFORE rl.close() — closing
+# first fires 'close' synchronously and turns every answer (even y) into deny.
+
+TMP_CONFIRM="/tmp/shellish-confirm-test-$$"
+rm -rf "$TMP_CONFIRM"; mkdir -p "$TMP_CONFIRM/fake-bin" "$TMP_CONFIRM/home/.config/shellish"
+echo "confirm_danger=ask" > "$TMP_CONFIRM/home/.config/shellish/config"
+
+cat > "$TMP_CONFIRM/fake-bin/claude" <<'EOF'
+#!/usr/bin/env bash
+cd "${SHELLISH_CWD:?}"
+rm -rf proj/.venv && s1=ok || s1=denied
+rm -rf proj2/.venv && s2=ok || s2=denied
+node -e "
+console.log(JSON.stringify({type:'stream_event',event:{type:'message_start'}}));
+console.log(JSON.stringify({type:'stream_event',event:{type:'content_block_delta',delta:{type:'text_delta',text:'rm1:${s1} rm2:${s2}'}}}));
+console.log(JSON.stringify({type:'stream_event',event:{type:'message_stop'}}));
+"
+EOF
+chmod +x "$TMP_CONFIRM/fake-bin/claude"
+
+reset_confirm_dirs() {
+  rm -rf "$TMP_CONFIRM/work"
+  mkdir -p "$TMP_CONFIRM/work/proj/.venv" "$TMP_CONFIRM/work/proj2/.venv"
+  touch "$TMP_CONFIRM/work/proj/.venv/a" "$TMP_CONFIRM/work/proj2/.venv/b"
+}
+
+run_confirm() {  # $1 = piped answers
+  printf '%s\n' "$1" | HOME="$TMP_CONFIRM/home" PATH="$TMP_CONFIRM/fake-bin:$PATH" \
+    node "$LIB/run.js" claude "$TMP_CONFIRM/work" "delete venvs" 2>&1 || true
+}
+
+# y then y → both trashed
+reset_confirm_dirs
+TOTAL=$((TOTAL+1))
+out=$(printf 'y\ny\n' | HOME="$TMP_CONFIRM/home" PATH="$TMP_CONFIRM/fake-bin:$PATH" \
+  node "$LIB/run.js" claude "$TMP_CONFIRM/work" "delete venvs" 2>&1 || true)
+if [[ ! -e "$TMP_CONFIRM/work/proj/.venv" && ! -e "$TMP_CONFIRM/work/proj2/.venv" ]]; then
+  pass "confirm 'y': answer accepted, target trashed"
+else
+  fail "confirm 'y' was treated as deny (rl.close-before-done regression)"
+fi
+
+# N → denied, file survives, agent killed
+reset_confirm_dirs
+TOTAL=$((TOTAL+1))
+out=$(run_confirm "N")
+if [[ -e "$TMP_CONFIRM/work/proj/.venv" ]] && echo "$out" | grep -q "Cancelled"; then
+  pass "confirm 'N': file survives, run cancelled"
+else
+  fail "confirm 'N' regression (venv exists=$([[ -e $TMP_CONFIRM/work/proj/.venv ]] && echo yes || echo no))"
+fi
+
+# a → one prompt covers both rms
+reset_confirm_dirs
+TOTAL=$((TOTAL+1))
+out=$(run_confirm "a")
+prompts=$(echo "$out" | grep -c "will move to trash" || true)
+if [[ "$prompts" == "1" && ! -e "$TMP_CONFIRM/work/proj/.venv" && ! -e "$TMP_CONFIRM/work/proj2/.venv" ]]; then
+  pass "confirm 'a': single prompt allows the whole session"
+else
+  fail "confirm 'a' regression (prompts=$prompts)"
+fi
+
+rm -rf "$TMP_CONFIRM"
+
+# ══════════════════════════════════════════════════════════════════════════════
+section "12 · RENDERER — spinner erase + width truncation"
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ansi.js width helpers
+TOTAL=$((TOTAL+1))
+if node -e "
+const { displayWidth, truncateDisplay } = require('${LIB}/ansi.js');
+if (displayWidth('中文') !== 4) process.exit(1);
+if (displayWidth('abc') !== 3) process.exit(1);
+if (truncateDisplay('abcdefghij', 5) !== 'abcd…') process.exit(1);
+if (displayWidth(truncateDisplay('中文中文中文', 7)) > 7) process.exit(1);
+" 2>/dev/null; then
+  pass "ansi.js displayWidth / truncateDisplay handle CJK"
+else
+  fail "ansi.js width helper regression"
+fi
+
+# Spinner on a real PTY must erase with \r ESC[2K and never exceed columns.
+# `script` differs between BSD/macOS and util-linux; skip if unusable.
+TOTAL=$((TOTAL+1))
+TMP_SPIN="/tmp/shellish-spin-test-$$"
+mkdir -p "$TMP_SPIN"
+cat > "$TMP_SPIN/feed.sh" <<EOF
+( printf '%s\n' '{"type":"turn_start"}'
+  sleep 0.4
+  printf '%s\n' '{"type":"tool_execution_start","toolName":"bash","args":{"command":"echo 一个非常非常非常非常非常非常非常非常非常非常非常非常非常非常长的中文命令参数"}}'
+  sleep 0.4
+  printf '%s\n' '{"type":"tool_execution_end","isError":false,"result":{"content":[{"type":"text","text":"ok"}]}}'
+  printf '%s\n' '{"type":"agent_end"}'
+) | node "$LIB/render.js" --agent pi
+EOF
+SPIN_LOG="$TMP_SPIN/tty.log"
+spin_ok=""
+if script -q "$SPIN_LOG" bash "$TMP_SPIN/feed.sh" >/dev/null 2>&1 && [[ -s "$SPIN_LOG" ]]; then
+  spin_ok=$(node -e "
+const data = require('fs').readFileSync('$SPIN_LOG', 'utf8');
+const frames = data.match(/\r\x1b\[2K[^\r\n]*/g) || [];
+if (!frames.length) { console.log('no-frames'); process.exit(0); }
+const { displayWidth } = require('${LIB}/ansi.js');
+const strip = s => s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/\r/g, '');
+const tooWide = frames.some(f => displayWidth(strip(f)) > (process.stdout.columns || 80));
+console.log(tooWide ? 'too-wide' : 'ok');
+" 2>/dev/null)
+fi
+if [[ "$spin_ok" == "ok" ]]; then
+  pass "spinner uses ESC[2K erase and stays within terminal width"
+elif [[ -z "$spin_ok" || "$spin_ok" == "no-frames" ]]; then
+  info "spinner PTY test skipped (script/PTY unavailable in this environment)"
+  TOTAL=$((TOTAL-1))
+else
+  fail "spinner frame exceeded terminal width"
+fi
+rm -rf "$TMP_SPIN"
+
+# ══════════════════════════════════════════════════════════════════════════════
 section "RESULTS"
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""

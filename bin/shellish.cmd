@@ -5,6 +5,11 @@
 :: Node is not yet on PATH; everything else is a single Node call so
 :: we do not depend on cmd.exe argument parsing edge cases.
 
+:: Inline version first: avoid Node/PATH lookup for a constant.
+if /i "%~1"=="version" goto :version
+if /i "%~1"=="--version" goto :version
+if /i "%~1"=="-v" goto :version
+
 :: Resolve paths relative to this .cmd file
 set "SHELLISH_ROOT=%~dp0.."
 set "SHELLISH_LIB=%SHELLISH_ROOT%\lib"
@@ -20,11 +25,6 @@ if not exist "%NODE_EXE%" (
     )
     set "NODE_EXE=node"
 )
-
-:: Inline version: avoid spinning up Node just to print a constant.
-if /i "%~1"=="version" goto :version
-if /i "%~1"=="--version" goto :version
-if /i "%~1"=="-v" goto :version
 
 :: Everything else (status, config, help, install-hook, --from-shell,
 :: or a raw natural-language prompt) is handled by shellish-cmd.js.

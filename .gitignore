@@ -13,3 +13,6 @@ Thumbs.db
 
 # shellish runtime (not part of source)
 .shellish/
+
+# local agent tooling
+.omx/

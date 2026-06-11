@@ -2,22 +2,15 @@
 # Added to $PROFILE by install.ps1 / shellish install-hook
 # Syntax target: Windows PowerShell 5.1+ and PowerShell 7+.
 #
-# Strategy:
-#   1. PSReadLine Enter handler: parse the buffer before PSReadLine dispatches
-#      the line. If the first token is not a known command, divert the full
-#      buffer (preserved verbatim) to shellish. Real commands flow through
-#      untouched. This is the only path that recovers full multi-token input.
-#   2. CommandNotFoundAction: best-effort fallback for hosts without
-#      PSReadLine (rare). PS 5.1 only exposes $Name here — the rest of the
-#      buffer is lost. We do what we can.
+# Design:
+#   - PATH exposes shellish.cmd as the Windows fallback CLI.
+#   - This PowerShell profile bypasses cmd.exe entirely: it defines a
+#     `shellish` function and the PSReadLine hook calls Node directly.
+#   - No same-name shellish.ps1 entry point is used, avoiding
+#     ExecutionPolicy conflicts and .cmd argument parsing on the hook path.
 
-# Resolve the install root without relying on $PSScriptRoot: the latter
-# is only meaningful when this file is run as a script; when the file
-# is dot-sourced from the command line (CI step, . $PROFILE) it inherits
-# the caller's $PSScriptRoot, which may be $null. $MyInvocation gives us
-# the path of *this* script regardless of how we got here, but in early
-# PS 5.1 builds it can also be empty when dot-sourced from an
-# interactive session, so fall back to PWD-derived heuristics.
+# Resolve install root. $MyInvocation works when dot-sourced from a profile;
+# fall back to walking up from CWD for CI/source-from-repo cases.
 $_shellishScriptPath = $null
 if ($MyInvocation -and $MyInvocation.MyCommand -and $MyInvocation.MyCommand.Path) {
     $_shellishScriptPath = $MyInvocation.MyCommand.Path
@@ -28,33 +21,28 @@ if (-not $_shellishScriptPath -and $PSCommandPath) {
 if ($_shellishScriptPath) {
     $_shellishRoot = Split-Path -Parent (Split-Path -Parent $_shellishScriptPath)
 } else {
-    # Last-resort: walk up from CWD looking for a sibling bin/ folder
-    # that contains shellish.ps1. Catches CI run-from-anywhere cases.
     $probe = Get-Location
     $_shellishRoot = $null
     for ($i = 0; $i -lt 8; $i++) {
-        if (Test-Path (Join-Path $probe 'bin\shellish.ps1') -PathType Leaf) {
+        if (Test-Path (Join-Path $probe 'lib\shellish-cmd.js') -PathType Leaf) {
             $_shellishRoot = $probe
             break
         }
-        $probe = Split-Path -Parent $probe
-        if (-not $probe -or $probe -eq (Split-Path -Parent $probe)) { break }
+        $parent = Split-Path -Parent $probe
+        if (-not $parent -or $parent -eq $probe) { break }
+        $probe = $parent
     }
     if (-not $_shellishRoot) { $_shellishRoot = Get-Location }
 }
-$global:_shellishBin = Join-Path $_shellishRoot 'bin\shellish.ps1'
-if (-not (Test-Path $global:_shellishBin)) {
-    $global:_shellishBin = Join-Path $_shellishRoot 'bin\shellish.cmd'
-}
-$_shellishBinDir = Split-Path -Parent $global:_shellishBin
 
-if (Test-Path $global:_shellishBin) {
-    # ── UTF-8 console ────────────────────────────────────────────────────
-    # PowerShell 5.1 on non-English Windows (CP936/CP932/...) corrupts
-    # CJK input and emoji in $input / Read-Host / `Out-File` defaults.
-    # Switch the three relevant encodings to UTF-8 for this session.
-    # We set the BOM-less variant ($false) so files we write do not gain
-    # a stray BOM. Re-sourcing this profile is safe.
+$script:ShellishRoot = $_shellishRoot
+$script:ShellishCli  = Join-Path $script:ShellishRoot 'lib\shellish-cmd.js'
+$script:ShellishNode = Join-Path $script:ShellishRoot 'node\node.exe'
+if (-not (Test-Path $script:ShellishNode)) { $script:ShellishNode = 'node' }
+$script:ShellishBinDir = Join-Path $script:ShellishRoot 'bin'
+
+if (Test-Path $script:ShellishCli) {
+    # UTF-8 console for CJK/emoji on Windows PowerShell 5.1.
     try {
         $utf8 = [System.Text.UTF8Encoding]::new($false)
         [Console]::InputEncoding  = $utf8
@@ -64,33 +52,36 @@ if (Test-Path $global:_shellishBin) {
         # non-fatal
     }
 
-    # Prefer the real install entrypoint for this PowerShell session. This avoids
-    # stale/broken copies of shellish.cmd in earlier PATH directories.
-    $pathParts = @($env:PATH -split ';' | Where-Object { $_ -and ($_ -ne $_shellishBinDir) })
-    $env:PATH = (@($_shellishBinDir) + $pathParts) -join ';'
+    # Prefer the real install bin for fallback commands such as shellish.cmd
+    # and shellish-trash.cmd.
+    if (Test-Path $script:ShellishBinDir) {
+        $pathParts = @($env:PATH -split ';' | Where-Object { $_ -and ($_ -ne $script:ShellishBinDir) })
+        $env:PATH = (@($script:ShellishBinDir) + $pathParts) -join ';'
+    }
 
-    # ── Helpers ────────────────────────────────────────────────────────────
-    # Is the first whitespace-delimited token of a line a known command?
-    # Used by the PSReadLine hook.
+    function global:shellish {
+        & $script:ShellishNode $script:ShellishCli @args
+        $global:LASTEXITCODE = $LASTEXITCODE
+    }
+
+    function global:Invoke-ShellishFromLine([string]$line) {
+        & $script:ShellishNode $script:ShellishCli --from-shell $line
+        $global:LASTEXITCODE = $LASTEXITCODE
+    }
+
     function global:Test-ShellishShouldHandle([string]$line) {
         if ([string]::IsNullOrWhiteSpace($line)) { return $false }
-        # Operators and redirections are commands, not natural language.
         if ($line -match '^\s*[|&;]\s*$' -or $line -match '^\s*[<>]') { return $false }
-        # Call operators: . .\script.ps1 (dot-source) and & $var (call) are
-        # valid PS commands, not natural language.
         if ($line -match '^\s*[&.]\s') { return $false }
-        # Assignment or expression: let PS evaluate it.
         if ($line -match '^\s*\$\w+\s*=') { return $false }
         if ($line -match '^\s*[\(\{]')    { return $false }
-        # Explicit paths / quoted executable paths are valid commands, not NL.
         if ($line -match '^\s*(\.\\|\.\/|~[\\/]|[A-Za-z]:[\\/]|\\\\)') { return $false }
         if ($line -match '^\s*"[^"]+"\s*(?:$|-)') { return $false }
         if ($line -match "^\s*'[^']+'\s*(?:$|-)") { return $false }
+
         $first = ($line.Trim() -split '\s+', 2)[0]
         if ([string]::IsNullOrEmpty($first)) { return $false }
-        # PowerShell language keywords that GetCommand does not always
-        # resolve. Cover the common ones explicitly so an `if (...)` or
-        # `foreach (...)` line is not hijacked.
+
         $keywords = @(
             'if','else','elseif','for','foreach','while','do','until',
             'switch','try','catch','finally','throw','return','exit',
@@ -99,118 +90,77 @@ if (Test-Path $global:_shellishBin) {
             'in','break','continue','trap'
         )
         if ($keywords -contains $first) { return $false }
-        # Try to resolve the first token as any kind of command.
+
         $cmd = $ExecutionContext.SessionState.InvokeCommand.GetCommand($first, 'All')
         return ($null -eq $cmd)
     }
 
-    function global:Invoke-ShellishFromLine([string]$line) {
-        & $global:_shellishBin --from-shell $line
-        $global:LASTEXITCODE = $LASTEXITCODE
-    }
-
-    # ── 1. PSReadLine Enter handler (preferred) ─────────────────────────────
-    # Use it if available. PSReadLine is bundled with PowerShell 5.1+ and
-    # Windows PowerShell ISE 5.1+; PS 7+ ships with it too.
+    # Preferred: PSReadLine Enter handler preserves the full line.
     $psrl = Get-Module -Name PSReadLine -ErrorAction SilentlyContinue
     if (-not $psrl) {
         try { $psrl = Import-Module PSReadLine -PassThru -ErrorAction Stop } catch { $psrl = $null }
     }
     if ($psrl) {
-        # Bind a key handler only if we have not already. PSReadLine does not
-        # expose its handler table directly; the description marker is the
-        # signal we use to make this idempotent.
         $alreadyBound = $false
         try {
             $alreadyBound = [bool] (Get-PSReadLineKeyHandler -Bound |
-                Where-Object { $_.Key   -eq 'Enter' -and
-                               $_.Description -eq 'shellish::enter' })
-        } catch {
-            # Get-PSReadLineKeyHandler exists since PSReadLine 1.6. If it
-            # isn't there we silently fall through and try Set-PSReadLineKeyHandler.
-            $alreadyBound = $false
-        }
+                Where-Object { $_.Key -eq 'Enter' -and $_.Description -eq 'shellish::enter' })
+        } catch { $alreadyBound = $false }
+
         if (-not $alreadyBound) {
             $handler = {
                 param($key, $arg)
-
-                # Pull the current buffer verbatim.
                 $line = $null
                 $cursor = $null
-                [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState(
-                    [ref]$line, [ref]$cursor) | Out-Null
+                [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor) | Out-Null
 
                 if (Test-ShellishShouldHandle $line) {
-                    # Wipe the buffer so AcceptLine does nothing, then call
-                    # shellish directly with the full original line.
-                    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
-                        0, $line.Length, '') | Out-Null
+                    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, '') | Out-Null
                     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine() | Out-Null
                     Invoke-ShellishFromLine $line
                     return
                 }
-
-                # Known command (or operator / assignment): let PSReadLine
-                # dispatch normally.
                 [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine() | Out-Null
             }
 
-            # PSReadLine 2.2+ accepts -Key; older builds (5.1 era) use -Chord.
-            # Try the modern form first, fall back to -Chord.
             try {
-                Set-PSReadLineKeyHandler `
-                    -Key Enter `
-                    -BriefDescription 'shellish::enter' `
-                    -LongDescription  'Divert natural-language input to shellish' `
-                    -ScriptBlock $handler
+                Set-PSReadLineKeyHandler -Key Enter -BriefDescription 'shellish::enter' -LongDescription 'Divert natural-language input to shellish' -ScriptBlock $handler
             } catch {
                 try {
-                    Set-PSReadLineKeyHandler `
-                        -Chord Enter `
-                        -BriefDescription 'shellish::enter' `
-                        -LongDescription  'Divert natural-language input to shellish' `
-                        -ScriptBlock $handler
+                    Set-PSReadLineKeyHandler -Chord Enter -BriefDescription 'shellish::enter' -LongDescription 'Divert natural-language input to shellish' -ScriptBlock $handler
                 } catch {
-                    # Cannot bind; CommandNotFoundAction remains as fallback.
+                    # Fallback remains CommandNotFoundAction.
                 }
             }
         }
     }
 
-    # ── 2. CommandNotFoundAction (last-resort fallback) ─────────────────────
-    # PSReadLine 2+ bypasses this for interactive input. It only fires for
-    # hosts without PSReadLine, and on PS 5.1 it only delivers $Name.
-    # Documented limitation: multi-token input is unrecoverable here.
+    # Last-resort fallback. Hosts without PSReadLine cannot recover full
+    # multi-token input; this is an API limitation.
     $ExecutionContext.InvokeCommand.CommandNotFoundAction = {
         param([string]$Name, [System.Management.Automation.CommandLookupEventArgs]$EventArgs)
-
-        # Skip PS internal probes.
         if ($Name -like 'Get-*') { return }
         if ([string]::IsNullOrWhiteSpace($Name)) { return }
 
-        $shellishBin = $global:_shellishBin
         $EventArgs.CommandScriptBlock = {
             $line = (@($Name) + @($args)) -join ' '
-            & $shellishBin --from-shell $line
-            $global:LASTEXITCODE = $LASTEXITCODE
+            Invoke-ShellishFromLine $line
         }.GetNewClosure()
     }
 
-    # ── 3. Wrap PS cmdlet/alias removers to route through safe-rm ────────
+    # ── Wrap PS cmdlet/alias removers to route through safe-rm ──────────
     # PowerShell resolves `rm` / `del` / `erase` / `rmdir` / `rd` as
     # aliases to the `Remove-Item` cmdlet — it never consults PATH, so
-    # the rm.cmd shim injected above is invisible to interactive PS
+    # the rm.cmd shim injected by run.js is invisible to interactive PS
     # sessions. We shadow the cmdlet with a global function that
-    # forwards all arguments verbatim to `shellish-trash`. The function
-    # does not implement any pipeline binding, so legitimate use of
-    # `Get-ChildItem | Remove-Item` will skip the wrapper and hit the
-    # real cmdlet — see the note below for how to opt out of the
-    # safety net.
+    # forwards all arguments verbatim to `shellish-trash` (resolved via
+    # PATH: the agent's session-aware shim when present, bin\
+    # shellish-trash.cmd otherwise). The function does not implement
+    # pipeline binding, so `Get-ChildItem | Remove-Item` skips the
+    # wrapper and hits the real cmdlet.
     #
-    # We install in the global scope so anything that uses a fully
-    # qualified cmdlet name (`Microsoft.PowerShell.Management\Remove-Item`)
-    # still bypasses us and works as expected. That is by design:
-    # scripts and modules that need to delete files opt out explicitly.
+    # Scripts and modules that need real deletion opt out explicitly with
+    # the fully qualified name `Microsoft.PowerShell.Management\Remove-Item`.
     #
     # Idempotency: re-sourcing this profile overwrites the function
     # definitions without warning.
@@ -246,6 +196,7 @@ if (Test-Path $global:_shellishBin) {
             return
         }
         & shellish-trash @passthrough
+        $global:LASTEXITCODE = $LASTEXITCODE
     }
     # The aliases `rm`, `del`, `erase`, `rmdir`, `rd` all resolve to
     # `Remove-Item`. We rebind them to our wrapper so they hit the

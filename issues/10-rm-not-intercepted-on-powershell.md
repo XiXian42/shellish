@@ -64,10 +64,15 @@ function global:Remove-Item {
 
 ## 状态
 
-⚠️ 部分修 (2026-06-01) — 在 `shell/profile.ps1` 注入第 3 段:
-PS cmdlet/alias 拦截。交互式 PowerShell 下 `rm` / `del` /
-`Remove-Item` 会进入 wrapper,但这不是完全等价的 PowerShell
-`Remove-Item` 实现。
+⚠️ 部分修 (2026-06-01,2026-06-11 回归后恢复) — 在
+`shell/profile.ps1` 注入 PS cmdlet/alias 拦截。交互式 PowerShell 下
+`rm` / `del` / `Remove-Item` 会进入 wrapper,但这不是完全等价的
+PowerShell `Remove-Item` 实现。
+
+> 2026-06-11: 一次 profile.ps1 重构曾整段移除该 wrapper(当时 CI 还加了
+> "Remove-Item 不应被覆盖" 的反向断言),导致 PowerShell 下删除完全绕过
+> safe-rm、只剩 prompt 约束。已恢复 wrapper + alias 重绑,CI 断言改回
+> 正向检查(wrapper 必须存在、5 个 alias 指向它、参数转发、-WhatIf 不落盘)。
 
 - `function global:Remove-Item` 包装,把参数透传给
   `shellish-trash`(用 `ValueFromRemainingArguments`)

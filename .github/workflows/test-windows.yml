@@ -56,9 +56,9 @@ jobs:
             Write-Host "$f syntax OK"
           }
 
-      - name: Syntax check PowerShell scripts
+      - name: Syntax check PowerShell hook
         run: |
-          foreach ($f in @("shell\profile.ps1", "bin\shellish.ps1")) {
+          foreach ($f in @("shell\profile.ps1")) {
             $errors = $null
             $null = [System.Management.Automation.Language.Parser]::ParseFile(
               "$PWD\$f", [ref]$null, [ref]$errors
@@ -71,15 +71,14 @@ jobs:
         shell: powershell
         run: |
           . "$PWD\shell\profile.ps1"
-          if (-not $global:_shellishBin) { Write-Error "profile did not set shellish bin"; exit 1 }
-          if (-not (Test-Path $global:_shellishBin)) { Write-Error "shellish bin missing: $global:_shellishBin"; exit 1 }
-          Write-Host "Windows PowerShell 5.1 profile load OK: $global:_shellishBin"
+          if (-not (Get-Command shellish -ErrorAction SilentlyContinue)) { Write-Error "profile did not define shellish function"; exit 1 }
+          if (-not (Test-Path $script:ShellishCli)) { Write-Error "shellish cli missing: $script:ShellishCli"; exit 1 }
+          Write-Host "Windows PowerShell 5.1 profile load OK: $script:ShellishCli"
 
       - name: Check required files exist
         run: |
           $files = @(
             "bin\shellish.cmd",
-            "bin\shellish.ps1",
             "bin\shellish-trash.cmd",
             "bin\shellish-rm.cmd",
             "lib\shellish-cmd.js",
@@ -135,13 +134,14 @@ jobs:
           findstr /C:"DRY_RUN fromShell=1" out.txt
           if %ERRORLEVEL% NEQ 0 exit /b 1
 
-      - name: Test PowerShell entrypoint preserves special characters
+      - name: Test PowerShell function preserves special characters
         shell: pwsh
         env:
           SHELLISH_DRY_RUN: "1"
         run: |
+          . "$PWD\shell\profile.ps1"
           $prompt = 'find files containing a & b | c > d < e ^ f "中文" 😢'
-          & .\bin\shellish.ps1 --from-shell $prompt > out-ps.txt
+          shellish --from-shell $prompt > out-ps.txt
           Get-Content out-ps.txt
           $out = Get-Content out-ps.txt -Raw
           if ($out -notmatch [regex]::Escape("DRY_RUN fromShell=1 prompt=$prompt")) { Write-Error "prompt was not preserved"; exit 1 }
@@ -302,6 +302,8 @@ jobs:
           # Source the profile. The wrapper overrides Remove-Item so the
           # function (not the cmdlet) is what `Get-Command` finds.
           . "$PWD\shell\profile.ps1"
+          $sh = Get-Command shellish -ErrorAction SilentlyContinue
+          if (-not $sh -or $sh.CommandType -ne 'Function') { Write-Error "shellish function not installed"; exit 1 }
           $ri = Get-Command Remove-Item -ErrorAction SilentlyContinue
           if (-not $ri) { Write-Error "Remove-Item missing"; exit 1 }
           if ($ri.CommandType -ne 'Function') {
@@ -344,6 +346,7 @@ jobs:
           Remove-Item baz -WhatIf
           if (Test-Path $log) { Write-Error "-WhatIf should not call shellish-trash"; exit 1 }
           Write-Host "Remove-Item wrapper behavior OK"
+
       - name: Test safe-rm.js (no-op, allow mode)
         run: |
           $env:SHELLISH_CONFIRM_DANGER = "allow"

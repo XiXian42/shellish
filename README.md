@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh |
 irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
 ```
 
-Use PowerShell 7 or Windows PowerShell 5.1 as the main Windows entry point. `shellish.cmd` exists as a compatibility shim, but PowerShell (`shellish.ps1`) preserves complex arguments, Unicode, and shell hooks more reliably than CMD.
+Use PowerShell 7 or Windows PowerShell 5.1 as the main Windows shell. The installer adds `shellish.cmd` to PATH and installs a PowerShell profile hook; once the hook is loaded, PowerShell calls shellish through Node directly, avoiding CMD argument parsing for natural-language input.
 
 If PowerShell blocks the hook with "running scripts is disabled", enable user scripts once:
 
@@ -96,14 +96,20 @@ deploy the app with production config
 why is my build failing?
 ```
 
-If a request happens to start with a word that is also a real shell command, your shell may run that command instead of handing the line to shellish. In those rare command-name conflicts, wrap the sentence in quotes so the shell treats it as one unknown command and shellish can handle it:
+If a request happens to start with a word that is also a real shell command, your shell may run that command instead of handing the line to shellish. In those rare command-name conflicts, on **zsh / bash** wrap the sentence in quotes so the shell treats it as one unknown command and shellish can handle it:
 
 ```bash
 "find all TODO comments in this repo and summarize them"
 "sort these files by size and summarize the largest ones"
 ```
 
-You can still call `shellish "..."` explicitly if you prefer.
+This quoting trick does not work in PowerShell (a quoted string is just an expression there) — on Windows, call shellish explicitly instead:
+
+```powershell
+shellish "find all TODO comments in this repo and summarize them"
+```
+
+You can also call `shellish "..."` explicitly on any platform if you prefer.
 
 ### Memory
 
@@ -217,7 +223,7 @@ curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh |
 irm https://raw.githubusercontent.com/XiXian42/shellish/main/install.ps1 | iex
 ```
 
-Windows 建议使用 PowerShell 7 或 Windows PowerShell 5.1 作为主入口。`shellish.cmd` 只是兼容 shim；PowerShell 入口（`shellish.ps1`）对复杂参数、Unicode 和 hook 更可靠。
+Windows 建议使用 PowerShell 7 或 Windows PowerShell 5.1。安装器会把 `shellish.cmd` 加入 PATH，并安装 PowerShell profile hook；hook 加载后，PowerShell 会直接通过 Node 调用 shellish，避免自然语言输入经过 CMD 参数解析。
 
 如果 PowerShell 提示 `running scripts is disabled`，需要为当前用户开启脚本执行：
 
@@ -265,14 +271,20 @@ deploy the app, 用 production 配置
 why is my build failing?
 ```
 
-如果某个请求刚好以真实 shell 命令名开头，shell 可能会直接执行该命令，而不是交给 shellish。遇到这类少数命令名冲突时，推荐把整句话用引号包起来，让 shell 把它当成一个未知命令交给 shellish：
+如果某个请求刚好以真实 shell 命令名开头，shell 可能会直接执行该命令，而不是交给 shellish。遇到这类少数命令名冲突时，在 **zsh / bash** 下推荐把整句话用引号包起来，让 shell 把它当成一个未知命令交给 shellish：
 
 ```bash
 "find all TODO comments in this repo and summarize them"
 "sort these files by size and summarize the largest ones"
 ```
 
-如果你更喜欢，也仍然可以显式调用 `shellish "..."`。
+这个引号技巧在 PowerShell 下无效（带引号的字符串在 PS 里只是一个表达式，会原样回显）——Windows 上请显式调用：
+
+```powershell
+shellish "find all TODO comments in this repo and summarize them"
+```
+
+任何平台上也都可以显式调用 `shellish "..."`。
 
 ### Memory
 
