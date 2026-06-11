@@ -287,9 +287,11 @@ jobs:
         shell: pwsh
         run: |
           # Load profile into a fresh session and confirm the key handler bound.
+          # PSReadLine surfaces the brief description as .Function on newer
+          # versions and .Description on older ones — accept either.
           . "$PWD\shell\profile.ps1"
           $bound = Get-PSReadLineKeyHandler -Bound -ErrorAction SilentlyContinue |
-              Where-Object { $_.Description -eq 'shellish::enter' }
+              Where-Object { $_.Function -eq 'shellish::enter' -or $_.Description -eq 'shellish::enter' }
           if (-not $bound) { Write-Error "shellish::enter key handler not bound"; exit 1 }
           Write-Host "PSReadLine handler bound OK: $($bound[0].Key)"
 

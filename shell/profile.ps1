@@ -116,8 +116,12 @@ if (Test-Path $script:ShellishCli) {
     if ($psrl) {
         $alreadyBound = $false
         try {
+            # Field layout differs across PSReadLine versions: newer ones
+            # surface the brief description as .Function (with .Description
+            # holding the long text); older ones put it in .Description.
             $alreadyBound = [bool] (Get-PSReadLineKeyHandler -Bound |
-                Where-Object { $_.Key -eq 'Enter' -and $_.Description -eq 'shellish::enter' })
+                Where-Object { $_.Key -eq 'Enter' -and (
+                    $_.Function -eq 'shellish::enter' -or $_.Description -eq 'shellish::enter') })
         } catch { $alreadyBound = $false }
 
         if (-not $alreadyBound) {
