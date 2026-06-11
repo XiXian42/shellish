@@ -665,6 +665,51 @@ fi
 rm -rf "$TMP_SPIN"
 
 # ══════════════════════════════════════════════════════════════════════════════
+section "13 · SHELL HOOKS — no FUNCNEST recursion, correct routing"
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Regression: the handler must be self-contained. The old version called a
+# helper function (_shellish_bin); in environments that inherited the handler
+# but not the helper, the unknown helper re-fired the handler → recursion
+# until FUNCNEST, flooding "command not found: _shellish_bin".
+
+TMP_HOOK="/tmp/shellish-hook-test-$$"
+mkdir -p "$TMP_HOOK"
+printf '#!/usr/bin/env bash\necho "SHELLISH CALLED: $*"\n' > "$TMP_HOOK/shellish"
+chmod +x "$TMP_HOOK/shellish"
+
+# zsh: unknown command without shellish → single clean error, exit 127
+TOTAL=$((TOTAL+1))
+hook_out=$(zsh -f -c "source '$TESTDIR/shell/zshrc.zsh'; PATH=/usr/bin:/bin; nope_cmd_xyz" 2>&1 || true)
+hook_lines=$(echo "$hook_out" | grep -c "command not found" || true)
+if [[ "$hook_lines" == "1" ]] && ! echo "$hook_out" | grep -q "FUNCNEST\|_shellish_bin"; then
+  pass "zsh hook: missing command → one error line, no recursion"
+else
+  fail "zsh hook recursion regression: $(echo "$hook_out" | head -2)"
+fi
+
+# zsh: natural language with shellish on PATH → routed with --from-shell
+TOTAL=$((TOTAL+1))
+hook_out=$(zsh -f -c "source '$TESTDIR/shell/zshrc.zsh'; PATH='$TMP_HOOK:/usr/bin:/bin'; hello natural language" 2>&1 || true)
+if echo "$hook_out" | grep -q "SHELLISH CALLED: --from-shell hello natural language"; then
+  pass "zsh hook: routes full line to shellish --from-shell"
+else
+  fail "zsh hook routing: $hook_out"
+fi
+
+# bash: handler defined and guarded (bash >= 4 fires it; 3.2 defines only)
+TOTAL=$((TOTAL+1))
+hook_out=$(bash -c "source '$TESTDIR/shell/bashrc.bash'; PATH=/usr/bin:/bin; nope_cmd_xyz" 2>&1 || true)
+if ! echo "$hook_out" | grep -q "_shellish_bin\|FUNCNEST" \
+   && [[ "$(echo "$hook_out" | grep -c 'command not found')" == "1" ]]; then
+  pass "bash hook: missing command → one error line, no recursion"
+else
+  fail "bash hook recursion regression: $(echo "$hook_out" | head -2)"
+fi
+
+rm -rf "$TMP_HOOK"
+
+# ══════════════════════════════════════════════════════════════════════════════
 section "RESULTS"
 # ══════════════════════════════════════════════════════════════════════════════
 echo ""
