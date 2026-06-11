@@ -264,7 +264,11 @@ jobs:
               @{ Line = 'Get-Help foo';        Expected = $false; Why = 'known cmdlet' }
               @{ Line = 'Remove-Item x';       Expected = $false; Why = 'known cmdlet' }
               @{ Line = '帮我压缩图片';         Expected = $true;  Why = 'CJK natural language' }
-              @{ Line = 'help me';             Expected = $true;  Why = 'multi-word NL' }
+              # NB: first token must not be a real command — 'help' is a
+              # built-in PowerShell function, so 'help me' correctly flows
+              # through to PowerShell rather than shellish.
+              @{ Line = 'summarize this directory'; Expected = $true; Why = 'multi-word NL' }
+              @{ Line = 'help me';             Expected = $false; Why = "first token is PowerShell's help function" }
               @{ Line = '';                    Expected = $false; Why = 'empty' }
               @{ Line = '   ';                 Expected = $false; Why = 'whitespace' }
           )
