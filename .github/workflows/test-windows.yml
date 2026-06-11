@@ -148,7 +148,10 @@ jobs:
 
       - name: Test context.js build
         run: |
-          $out = node lib\context.js build $PWD "list files"
+          # Join to a single string: PowerShell captures native output as a
+          # line array, and array -notmatch returns the non-matching LINES
+          # (truthy whenever any line lacks the pattern) — a false failure.
+          $out = (node lib\context.js build $PWD "list files") -join "`n"
           if ($out -match "Instructions") { Write-Host "context.js OK" }
           else { Write-Error "context.js unexpected output"; exit 1 }
           if ($out -notmatch "Host OS: Windows") { Write-Error "Windows host rule missing"; exit 1 }
@@ -158,7 +161,7 @@ jobs:
       - name: Test SHELLISH_HOME override
         run: |
           $env:SHELLISH_HOME = "$env:TEMP\shellish-home-ci"
-          $out = node lib\context.js build $PWD "remember test"
+          $out = (node lib\context.js build $PWD "remember test") -join "`n"
           if ($out -match [regex]::Escape($env:SHELLISH_HOME)) { Write-Host "SHELLISH_HOME override OK" }
           else { Write-Error "SHELLISH_HOME override not reflected in prompt"; exit 1 }
 
@@ -349,11 +352,24 @@ jobs:
           if (Test-Path $log) { Write-Error "-WhatIf should not call shellish-trash"; exit 1 }
           Write-Host "Remove-Item wrapper behavior OK"
 
-      - name: Test safe-rm.js (no-op, allow mode)
+      - name: Test safe-rm.js (rm semantics, allow mode)
         run: |
           $env:SHELLISH_CONFIRM_DANGER = "allow"
           $env:SHELLISH_SESSION_DIR = $env:TEMP
+          # rm semantics: no operands → exit 1; -f with no operands → exit 0
           node lib\safe-rm.js
+          if ($LASTEXITCODE -ne 1) { Write-Error "no operands should exit 1, got $LASTEXITCODE"; exit 1 }
+          node lib\safe-rm.js -f
+          if ($LASTEXITCODE -ne 0) { Write-Error "-f no operands should exit 0, got $LASTEXITCODE"; exit 1 }
+          # -f with a missing path is silently ignored (exit 0)
+          node lib\safe-rm.js -rf "$env:TEMP\shellish-definitely-missing-xyz"
+          if ($LASTEXITCODE -ne 0) { Write-Error "-rf missing path should exit 0, got $LASTEXITCODE"; exit 1 }
+          # real file goes to the Recycle Bin
+          $probe = Join-Path $env:TEMP "shellish-recycle-probe.txt"
+          Set-Content $probe -Value "x"
+          node lib\safe-rm.js -rf $probe
+          if ($LASTEXITCODE -ne 0) { Write-Error "recycle failed with $LASTEXITCODE"; exit 1 }
+          if (Test-Path $probe) { Write-Error "file still exists after safe-rm"; exit 1 }
           Write-Host "safe-rm.js OK"
 
       - name: Test agent resolution on real Windows
