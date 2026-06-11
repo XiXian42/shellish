@@ -53,10 +53,13 @@ if (Test-Path $script:ShellishCli) {
     }
 
     # Prefer the real install bin for fallback commands such as shellish.cmd
-    # and shellish-trash.cmd.
+    # and shellish-trash.cmd. Use the platform PATH separator (';' Windows,
+    # ':' Unix) so sourcing this profile in pwsh on macOS/Linux for tests
+    # does not corrupt PATH.
     if (Test-Path $script:ShellishBinDir) {
-        $pathParts = @($env:PATH -split ';' | Where-Object { $_ -and ($_ -ne $script:ShellishBinDir) })
-        $env:PATH = (@($script:ShellishBinDir) + $pathParts) -join ';'
+        $_sep = [System.IO.Path]::PathSeparator
+        $pathParts = @($env:PATH -split [regex]::Escape($_sep) | Where-Object { $_ -and ($_ -ne $script:ShellishBinDir) })
+        $env:PATH = (@($script:ShellishBinDir) + $pathParts) -join $_sep
     }
 
     function global:shellish {
@@ -91,7 +94,17 @@ if (Test-Path $script:ShellishCli) {
         )
         if ($keywords -contains $first) { return $false }
 
-        $cmd = $ExecutionContext.SessionState.InvokeCommand.GetCommand($first, 'All')
+        # Suspend our own CommandNotFoundAction during the probe: GetCommand
+        # fires it, and the action supplies a CommandScriptBlock — which makes
+        # every unknown name look like a real command and the classifier
+        # answer "known" for all natural-language input.
+        $cnfAction = $ExecutionContext.InvokeCommand.CommandNotFoundAction
+        $ExecutionContext.InvokeCommand.CommandNotFoundAction = $null
+        try {
+            $cmd = $ExecutionContext.SessionState.InvokeCommand.GetCommand($first, 'All')
+        } finally {
+            $ExecutionContext.InvokeCommand.CommandNotFoundAction = $cnfAction
+        }
         return ($null -eq $cmd)
     }
 
@@ -202,9 +215,24 @@ if (Test-Path $script:ShellishCli) {
     # `Remove-Item`. We rebind them to our wrapper so they hit the
     # wrapper regardless of whether the user typed the alias or the
     # cmdlet name.
-    Set-Alias -Name rm     -Value Remove-Item -Scope Global -Force
-    Set-Alias -Name del    -Value Remove-Item -Scope Global -Force
-    Set-Alias -Name erase  -Value Remove-Item -Scope Global -Force
-    Set-Alias -Name rmdir  -Value Remove-Item -Scope Global -Force
-    Set-Alias -Name rd     -Value Remove-Item -Scope Global -Force
+    #
+    # Some of these ship with the AllScope option (which ones varies by
+    # PS version/platform — e.g. `del` on pwsh). AllScope can never be
+    # removed from an existing alias, so a plain Set-Alias on it raises
+    # an error — fatal under $ErrorActionPreference = 'Stop' (the GitHub
+    # Actions default), killing the whole profile load. Preserve the
+    # option when present; the try/catch keeps one stubborn alias from
+    # breaking shell startup.
+    foreach ($_shellishAlias in 'rm','del','erase','rmdir','rd') {
+        try {
+            $_existing = Get-Alias -Name $_shellishAlias -ErrorAction SilentlyContinue
+            if ($_existing -and ($_existing.Options -band [System.Management.Automation.ScopedItemOptions]::AllScope)) {
+                Set-Alias -Name $_shellishAlias -Value Remove-Item -Scope Global -Force -Option AllScope
+            } else {
+                Set-Alias -Name $_shellishAlias -Value Remove-Item -Scope Global -Force
+            }
+        } catch {
+            Write-Verbose "shellish: could not rebind alias '$_shellishAlias': $_"
+        }
+    }
 }

@@ -335,8 +335,10 @@ jobs:
             'echo %*>>"%SHELLISH_FAKE_TRASH_LOG%"'
           )
           $env:SHELLISH_FAKE_TRASH_LOG = $log
-          $env:PATH = "$fakeDir;$env:PATH"
+          # Source the profile FIRST: it prepends the repo bin dir to PATH,
+          # so the fake must be prepended afterwards to win resolution.
           . "$PWD\shell\profile.ps1"
+          $env:PATH = "$fakeDir;$env:PATH"
           Remove-Item -Recurse foo
           del bar
           $content = Get-Content $log -Raw
