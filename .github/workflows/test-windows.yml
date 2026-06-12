@@ -75,6 +75,18 @@ jobs:
           if (-not (Test-Path $script:ShellishCli)) { Write-Error "shellish cli missing: $script:ShellishCli"; exit 1 }
           Write-Host "Windows PowerShell 5.1 profile load OK: $script:ShellishCli"
 
+      - name: Check .cmd files are CRLF
+        run: |
+          # cmd.exe misparses LF-only batch files (goto/label scanning) and
+          # shellish.cmd can hang. .gitattributes forces eol=crlf — verify it
+          # held through checkout so zip installs (git archive) get CRLF too.
+          foreach ($f in Get-ChildItem "bin\*.cmd") {
+            $raw = [System.IO.File]::ReadAllText($f.FullName)
+            if ($raw -notmatch "`r`n") { Write-Error "$($f.Name) has no CRLF line endings"; exit 1 }
+            if ($raw -match "(?<!`r)`n") { Write-Error "$($f.Name) contains bare LF line endings"; exit 1 }
+            Write-Host "  CRLF OK  $($f.Name)"
+          }
+
       - name: Check required files exist
         run: |
           $files = @(

@@ -1,0 +1,13 @@
+# cmd.exe requires CRLF: LF-only batch files break goto/label scanning and
+# can hang the parser. git archive — and therefore GitHub's zip downloads,
+# which install.ps1 uses — honor these attributes, so zip installs get CRLF.
+*.cmd  text eol=crlf
+
+# Bash/zsh scripts must stay LF even on Windows checkouts (autocrlf=true
+# would otherwise inject \r and break them under Git Bash / WSL).
+*.sh   text eol=lf
+*.bash text eol=lf
+*.zsh  text eol=lf
+bin/shellish        text eol=lf
+bin/shellish-trash  text eol=lf
+bin/shellish-rm     text eol=lf

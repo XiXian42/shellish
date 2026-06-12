@@ -73,6 +73,20 @@ try {
     if (Test-Path $src) { Microsoft.PowerShell.Management\Remove-Item -Recurse -Force $src }
 }
 
+# cmd.exe requires CRLF: with LF-only batch files the parser's label/goto
+# scanning misbehaves and shellish.cmd can hang. The repo's .gitattributes
+# marks *.cmd as eol=crlf (which GitHub's zip generation honors), but
+# normalize here too in case the archive predates that or a proxy rewrote
+# the bytes.
+foreach ($cmdFile in Get-ChildItem "$INSTALL_DIR\bin\*.cmd" -ErrorAction SilentlyContinue) {
+    $raw = [System.IO.File]::ReadAllText($cmdFile.FullName)
+    $crlf = $raw -replace "`r`n", "`n" -replace "`n", "`r`n"
+    if ($crlf -ne $raw) {
+        [System.IO.File]::WriteAllText($cmdFile.FullName, $crlf, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Dim "Normalized line endings: $($cmdFile.Name)"
+    }
+}
+
 Write-Ok "Downloaded to $INSTALL_DIR"
 
 # ── add bin to PATH ───────────────────────────────────────────────────────────
@@ -268,9 +282,18 @@ function Remove-ShellishHookBlock($text) {
     $text = [regex]::Replace($text, '(?ms)\r?\n?# shellish hook\r?\n\.\s+".*?shellish[\\/]+shell[\\/]+profile\.ps1"\r?\n?', "`n")
     return $text.TrimEnd()
 }
+# Resolve the real Documents folder: with OneDrive/folder redirection,
+# %USERPROFILE%\Documents may be read-only (or simply not where PowerShell
+# reads $PROFILE from). GetFolderPath follows the redirection.
+$docsDirs = @()
+try { $docsDirs += [Environment]::GetFolderPath('MyDocuments') } catch { }
+$docsDirs += "$env:USERPROFILE\Documents"
+$docsDirs = @($docsDirs | Where-Object { $_ } | Select-Object -Unique)
 $profileFiles = @(
-    "$env:USERPROFILE\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1",
-    "$env:USERPROFILE\Documents\PowerShell\Microsoft.PowerShell_profile.ps1"
+    foreach ($d in $docsDirs) {
+        Join-Path $d 'WindowsPowerShell\Microsoft.PowerShell_profile.ps1'
+        Join-Path $d 'PowerShell\Microsoft.PowerShell_profile.ps1'
+    }
 ) | Select-Object -Unique
 $hookLine = "`n$HOOK_BEGIN`n. `"$INSTALL_DIR\shell\profile.ps1`"`n$HOOK_END`n"
 $hookInstalled = $false
