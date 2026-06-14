@@ -7,14 +7,19 @@
 ## English
 
 Type natural language at your shell prompt — AI handles the rest.
+Any language your model understands works; the examples below are just English.
 
 ```
-$ compress all png files in this directory
+$ shrink every png in this folder
 
 $ fix the last git conflict
 
-$ what's the weather in Beijing today
+$ why is my docker build so slow
 ```
+
+(If a request starts with a word that's also a real command — `find`, `sort`,
+`compress` … — your shell runs that instead. Wrap it in quotes or call
+`shellish "…"`. See [Usage](#usage).)
 
 Typos are caught and corrected, never executed:
 
