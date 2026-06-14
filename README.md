@@ -2,14 +2,14 @@
 
 [English](#english) | [中文](#中文)
 
-![shellish demo](docs/demo.gif)
-
 ---
 
 ## English
 
 Type natural language at your shell prompt — AI handles the rest.
 Any language your model understands works; the examples below are just English.
+
+![shellish demo](docs/demo.gif)
 
 ```
 $ shrink every png in this folder
@@ -216,7 +216,9 @@ Shell: zsh / bash / PowerShell
 
 ## 中文
 
-在终端里直接说话，AI 帮你干活。
+在终端里直接说话，AI 帮你干活。任何模型能理解的语言都行，下面的例子只是举例。
+
+![shellish demo](docs/demo.gif)
 
 ```
 $ 帮我把当前目录所有 png 压缩一下

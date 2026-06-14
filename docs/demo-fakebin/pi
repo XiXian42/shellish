@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+e() { printf '%s\n' "$1"; sleep "${2:-0.05}"; }
+full="$*"
+req="${full##*## Request}"
+
+emit_typo() {
+  e '{"type":"turn_start"}' 0.2
+  for w in "__TYPO__: " "git " "status"; do
+    e "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"$w\"}}" 0.05
+  done
+  e '{"type":"agent_end"}' 0.1
+}
+emit_shrink() {
+  e '{"type":"turn_start"}' 0.3
+  e '{"type":"tool_execution_start","toolName":"bash","args":{"command":"ls -1 *.png"}}' 0.5
+  e '{"type":"tool_execution_end","isError":false,"result":{"content":[{"type":"text","text":"photo_1.png\nphoto_2.png\nphoto_3.png"}]}}' 0.4
+  e '{"type":"tool_execution_start","toolName":"bash","args":{"command":"for f in *.png; do sips -Z 800 \"$f\"; done"}}' 0.7
+  e '{"type":"tool_execution_end","isError":false,"result":{"content":[{"type":"text","text":"photo_1.png  600x600\nphoto_2.png  800x800 -> 800\nphoto_3.png  1000x1000 -> 800"}]}}' 0.5
+  for w in "Resized " "all " "3 " "PNGs " "to " "max " "800px " "on " "the " "long " "edge."; do
+    e "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"$w\"}}" 0.07
+  done
+  e '{"type":"agent_end"}' 0.1
+}
+emit_delete() {
+  e '{"type":"turn_start"}' 0.3
+  e '{"type":"tool_execution_start","toolName":"bash","args":{"command":"rm -f *.png"}}' 0.5
+  # ACTUALLY run rm — shellish injects safe-rm into PATH, which will intercept,
+  # prompt the user, and (on N) decline. Block here until that resolves.
+  rm -f *.png >/dev/null 2>&1
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    e '{"type":"tool_execution_end","isError":true,"result":{"content":[{"type":"text","text":"cancelled by user"}]}}' 0.3
+    for w in "Okay, " "left " "the " "files " "in " "place."; do
+      e "{\"type\":\"message_update\",\"assistantMessageEvent\":{\"type\":\"text_delta\",\"delta\":\"$w\"}}" 0.07
+    done
+  fi
+  e '{"type":"agent_end"}' 0.1
+}
+
+case "$req" in
+  *gti*)             emit_typo ;;
+  *delete*|*remove*) emit_delete ;;
+  *)                 emit_shrink ;;
+esac
