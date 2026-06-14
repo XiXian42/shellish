@@ -11,3 +11,6 @@
 bin/shellish        text eol=lf
 bin/shellish-trash  text eol=lf
 bin/shellish-rm     text eol=lf
+
+# Binary assets — never normalize line endings.
+*.gif binary

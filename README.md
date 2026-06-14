@@ -2,6 +2,8 @@
 
 [English](#english) | [中文](#中文)
 
+![shellish demo](docs/demo.gif)
+
 ---
 
 ## English
@@ -92,7 +94,7 @@ shellish uses whatever is already on your system — it won't install agents for
 After installing the hook, just type natural language at the prompt:
 
 ```bash
-compress all png files in this directory
+shrink all png files in this directory
 
 fix the last git conflict
 
