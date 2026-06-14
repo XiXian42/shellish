@@ -169,6 +169,32 @@ save to shellish data history/ (`~/.shellish` or `%APPDATA%\shellish`)
 On delete: `rm` is replaced by safe-rm which moves files to trash.  
 macOS uses the `trash` CLI; Linux follows the freedesktop Trash spec.
 
+### Security — read this before you install
+
+Be honest with yourself about what this is: shellish takes your
+natural-language line, sends it to an LLM, and runs the shell commands that
+come back.
+
+- **Commands run without a per-command confirmation.** shellish launches the
+  underlying agent with its approval prompts turned off (Claude Code with
+  `--dangerously-skip-permissions`, Codex with
+  `--dangerously-bypass-approvals-and-sandbox`). The agent can read, write, and
+  execute freely in your shell. There is **no sandbox**.
+- **The one guardrail is deletion.** `rm` is rerouted to safe-rm, which moves
+  targets to the trash/Recycle Bin and (in `ask` mode) prompts you first. That
+  is the *only* operation gated this way — `curl … | bash`, `git push --force`,
+  `sudo …`, overwriting files, and anything else run with no extra prompt.
+- **Your input leaves your machine.** Each request sends the LLM your prompt,
+  the current working directory, recent history for that directory (last ~24h,
+  up to 10 entries), and your `memory.md`. Where that goes is governed by
+  whichever agent you configured and its privacy terms — shellish itself has no
+  server and stores nothing remotely.
+
+Sensible use: run it in directories you trust, on a machine where you'd already
+let a coding agent operate, and read the streamed commands as they execute. If
+you want a hard sandbox or mandatory per-command approval, this tool is not that
+— use your agent directly with its own approval flow.
+
 ### Platforms
 
 | Platform | Status |
@@ -343,6 +369,16 @@ LLM 判断：typo → 显示纠正  /  自然语言 → 继续
 
 删除文件时：`rm` 被替换为 safe-rm，移入回收站而非直接删除。macOS 用 `trash` CLI，Linux 遵循 freedesktop Trash spec。
 
+### 安全说明 — 安装前请先读
+
+请清楚这个工具的本质：shellish 把你的自然语言交给 LLM，再执行它返回的 shell 命令。
+
+- **命令执行没有逐条确认。** shellish 启动底层 agent 时关掉了它自己的审批提示（Claude Code 用 `--dangerously-skip-permissions`，Codex 用 `--dangerously-bypass-approvals-and-sandbox`）。agent 可以在你的 shell 里自由读写和执行，**没有沙箱**。
+- **唯一的护栏是删除。** `rm` 被改道到 safe-rm，移入回收站，并在 `ask` 模式下先弹确认。这是**唯一**被这样拦截的操作——`curl … | bash`、`git push --force`、`sudo …`、覆盖文件等等，都不会额外确认。
+- **输入会离开你的机器。** 每次请求会把你的输入、当前工作目录、该目录最近的历史（约 24 小时内、最多 10 条）以及你的 `memory.md` 发给 LLM。这些数据最终去哪由你配置的 agent 及其隐私条款决定——shellish 自己没有服务器，不在远端存任何东西。
+
+合理的用法：在你信任的目录里用，在你本来就愿意让 coding agent 操作的机器上用，并且边执行边看流式输出的命令。如果你需要硬沙箱或强制逐条审批，这个工具做不到——那就直接用你的 agent、走它自己的审批流程。
+
 ### 平台
 
 | 平台 | 状态 |
@@ -357,4 +393,4 @@ Shell：zsh / bash / PowerShell
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
