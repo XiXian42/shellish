@@ -1,0 +1,14 @@
+{%- comment -%}
+Custom masthead overriding minima's default header.
+minima's header auto-lists every page that has a `title` (here: the post
+itself and 404.html), which cluttered the nav with "Page not found". This
+single-page site only needs the site name and one outbound link.
+{%- endcomment -%}
+<header class="site-header" role="banner">
+  <div class="wrapper">
+    <a class="site-title" rel="author" href="{{ "/" | relative_url }}">{{ site.title | escape }}</a>
+    <nav class="site-nav">
+      <a class="page-link" href="https://github.com/XiXian42/shellish">GitHub</a>
+    </nav>
+  </div>
+</header>
