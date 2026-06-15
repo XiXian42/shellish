@@ -3,7 +3,7 @@ title: shellish
 description: >-
   A free, open-source AI terminal helper that runs inside the shell you
   already have. Turn a sentence — in any language — into the right command,
-  catch typos, and send every rm to the trash instead of the void.
+  catch typos, and route the AI's deletions to the trash instead of the void.
 url: "https://xixian42.github.io"
 baseurl: "/shellish"
 
@@ -11,6 +11,10 @@ baseurl: "/shellish"
 theme: minima
 plugins:
   - jekyll-seo-tag      # emits <title>, og:, twitter: meta from page front matter
+
+# Single-page site: don't auto-list every page (incl. 404) in the header nav.
+# An empty list leaves the masthead with just the site title.
+header_pages: []
 
 # Twitter card attribution (used by jekyll-seo-tag)
 twitter:

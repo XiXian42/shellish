@@ -10,9 +10,23 @@ description: >-
 image: /demo.gif
 ---
 
-*A free, open-source AI terminal helper that runs inside the shell you already have. It turns a sentence — in any language — into the right command, catches your typos, and sends every `rm` to the trash instead of the void. Here's how a thirty-line hack turned into a lesson about shells, LLMs, and the gap between a clever idea and a safe one.*
+<style>
+/* Reading-experience tweaks layered on top of the minima theme.
+   Element selectors only, so the page stays plain Markdown. */
+.page-content .wrapper { max-width: 46rem; }
+.post-content, .page-content { font-size: 1.05rem; line-height: 1.72; }
+.post-content h2, .page-content h2 { margin-top: 2.4rem; padding-top: 1.2rem; border-top: 1px solid #eee; }
+.post-content h3, .page-content h3 { margin-top: 1.8rem; }
+.post-content img, .page-content img { border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.14); display: block; margin: 1.6rem auto; }
+.post-content blockquote, .page-content blockquote { font-style: normal; color: #555; border-left: 4px solid #ccd6dd; }
+.post-content pre, .page-content pre { border-radius: 8px; font-size: .88rem; }
+.post-content hr, .page-content hr { border: 0; border-top: 1px solid #eee; margin: 2.2rem 0; }
+.post-content > p:first-of-type em, .page-content > p:first-of-type em { font-size: 1.15rem; line-height: 1.6; color: #444; }
+</style>
 
-🐦 [Follow along on X](https://x.com/xixian42/status/2066172763577143498?s=20) · 💻 [Source on GitHub](https://github.com/XiXian42/shellish) (MIT)
+*A free, open-source AI terminal helper that runs inside the shell you already have. It turns a sentence — in any language — into the right command, catches your typos, and when the AI reaches for `rm`, routes that deletion to the trash instead of the void. Here's how a thirty-line hack turned into a lesson about shells, LLMs, and the gap between a clever idea and a safe one.*
+
+🐦&nbsp;[Follow along on X](https://x.com/xixian42/status/2066172763577143498?s=20) &nbsp;·&nbsp; 💻&nbsp;[Source on GitHub](https://github.com/XiXian42/shellish) (MIT)
 
 ![shellish demo]({{ "/demo.gif" | relative_url }})
 
@@ -96,7 +110,7 @@ This is the part I feel strongest about, and it's where the project stopped bein
 
 There's a reason "*how to undo an `rm` command*" is a perennial search on Linux, Mac, and Windows alike: the plain answer is *you mostly can't*. If you let an AI run shell commands, sooner or later it's going to run `rm`. Maybe it's right. Maybe it misread your request. Maybe it globbed something wider than you meant. On a normal shell, `rm -rf` is final. There's no trash can, no undo.
 
-So shellish quietly reroutes deletion. Before launching the agent, it puts a fake `rm` (and `del`, `rmdir`, etc.) earlier on the `PATH` than the real one. When the agent runs `rm something`, it actually hits my script, which:
+So shellish quietly reroutes deletion *for the agent*. To be precise about the scope: this only touches commands the AI runs on your behalf — your own `rm` at the prompt is untouched, exactly as you'd want. Before launching the agent, shellish puts a fake `rm` (and `del`, `rmdir`, etc.) earlier on the `PATH` than the real one, but only on the `PATH` it hands to that child process. When the agent runs `rm something`, it actually hits my script, which:
 
 1. pauses and tells the parent process "the agent wants to delete X",
 2. the parent shows *you* a prompt — allow once, allow all this session, or deny,
