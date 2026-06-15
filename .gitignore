@@ -16,3 +16,6 @@ Thumbs.db
 
 # local agent tooling
 .omx/
+
+# draft blog post — not part of the repo
+blog.md

@@ -1,0 +1,26 @@
+# GitHub Pages site for shellish — served from /docs on the default branch.
+title: shellish
+description: >-
+  A free, open-source AI terminal helper that runs inside the shell you
+  already have. Turn a sentence — in any language — into the right command,
+  catch typos, and send every rm to the trash instead of the void.
+url: "https://xixian42.github.io"
+baseurl: "/shellish"
+
+# Minima is bundled with GitHub Pages — no build step, no extra gems.
+theme: minima
+plugins:
+  - jekyll-seo-tag      # emits <title>, og:, twitter: meta from page front matter
+
+# Twitter card attribution (used by jekyll-seo-tag)
+twitter:
+  username: xixian42
+  card: summary_large_image
+
+author:
+  name: xixian42
+
+# Keep Jekyll from trying to render repo scaffolding as site pages.
+exclude:
+  - demo.tape
+  - demo-fakebin/
