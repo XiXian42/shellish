@@ -7,14 +7,14 @@ description: >-
   command, corrects your typos, and sends every rm to the trash. A
   stays-out-of-your-way, open-source alternative to AI terminals like Warp,
   using the Claude or Codex CLI you already have.
-image: /shellish/demo.gif
+image: /demo.gif
 ---
 
 *A free, open-source AI terminal helper that runs inside the shell you already have. It turns a sentence — in any language — into the right command, catches your typos, and sends every `rm` to the trash instead of the void. Here's how a thirty-line hack turned into a lesson about shells, LLMs, and the gap between a clever idea and a safe one.*
 
 🐦 [Follow along on X](https://x.com/xixian42/status/2066172763577143498?s=20) · 💻 [Source on GitHub](https://github.com/XiXian42/shellish) (MIT)
 
-![shellish demo](/shellish/demo.gif)
+![shellish demo]({{ "/demo.gif" | relative_url }})
 
 ```
 curl -fsSL https://raw.githubusercontent.com/XiXian42/shellish/main/install.sh | bash
